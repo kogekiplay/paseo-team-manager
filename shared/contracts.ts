@@ -28,9 +28,24 @@ export const ProviderCatalogThinkingOptionSchema = ProviderCatalogModeSchema.ext
   isDefault: z.boolean().optional(),
 });
 export const ProviderCatalogModelSchema = ProviderCatalogModeSchema.extend({
+  isSelectable: z.boolean().optional(),
   isDefault: z.boolean().optional(),
   defaultThinkingOptionId: z.string().optional(),
   thinkingOptions: z.array(ProviderCatalogThinkingOptionSchema),
+});
+export const MemberResolutionStatusSchema = z.enum(["explicit", "auto-matched", "fallback-host", "fallback-caller", "unresolved"]);
+export const ResolvedMemberSummarySchema = z.object({
+  memberId: z.string(),
+  roleId: z.string(),
+  status: MemberResolutionStatusSchema,
+  configuredProvider: z.string(),
+  configuredModel: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  thinkingOptionId: z.string(),
+  modeId: z.string(),
+  features: z.record(z.string(), FeatureValueSchema),
+  fallbackReason: z.string().nullable(),
 });
 export const ProviderCatalogEntrySchema = z.object({
   provider: z.string(),
@@ -94,6 +109,7 @@ export const workspaceTeamStateOutputSchema = z.object({
   excludedByDirectory: z.string().nullable(),
   activePresetId: z.string(),
   activePreset: TeamPresetSchema,
+  resolvedMembers: z.array(ResolvedMemberSummarySchema),
   agents: z.array(WorkspaceTeamAgentSchema),
 });
 export const previewCommanderPromptInputSchema = z.object({
@@ -107,6 +123,7 @@ export const previewCommanderPromptOutputSchema = z.object({
   presetId: z.string(),
   commanderPrompt: z.string(),
   rolePrompt: z.string().nullable(),
+  resolvedMembers: z.array(ResolvedMemberSummarySchema),
 });
 
 export const getProviderCatalogRpc = defineRpc({
@@ -127,6 +144,8 @@ export type ProviderCatalogMode = z.infer<typeof ProviderCatalogModeSchema>;
 export type ProviderCatalogThinkingOption = z.infer<typeof ProviderCatalogThinkingOptionSchema>;
 export type ProviderCatalogModel = z.infer<typeof ProviderCatalogModelSchema>;
 export type ProviderCatalogEntry = z.infer<typeof ProviderCatalogEntrySchema>;
+export type MemberResolutionStatus = z.infer<typeof MemberResolutionStatusSchema>;
+export type ResolvedMemberSummary = z.infer<typeof ResolvedMemberSummarySchema>;
 export type WorkspaceTeamAgent = z.infer<typeof WorkspaceTeamAgentSchema>;
 export type ProviderCatalogInput = z.infer<typeof providerCatalogInputSchema>;
 export type ProviderCatalogOutput = z.infer<typeof providerCatalogOutputSchema>;

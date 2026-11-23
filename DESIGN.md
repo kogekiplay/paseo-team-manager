@@ -90,16 +90,16 @@
 
 | 角色 ID | 名称 | 默认启用 | Provider / Model | Thinking | Mode | Features | 职责 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `backend` | 后端开发 | 是 | `codex/auto/gpt-6.2-sol` | `xhigh` | `full-access` | `{ "service_tier": "default" }` | 服务端/daemon/API/数据层/算法逻辑/单元测试 |
-| `frontend` | 前端开发 | 是 | `antigravity/gemini-4-neon` | `high` | `full-access` | `{}` | UI 组件、交互体验、样式主题、跨端响应式适配 |
+| `backend` | 后端开发 | 是 | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | 服务端/daemon/API/数据层/算法逻辑/单元测试 |
+| `frontend` | 前端开发 | 是 | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | UI 组件、交互体验、样式主题、跨端响应式适配 |
 
 ### 4.3 内置可选扩展成员（预设中预置，可一键开关）
 
 | 角色 ID | 名称 | 默认启用 | 推荐 Provider / Model | Thinking | Mode | Features | 定位 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `reviewer` | 代码审查官 | 否（按需开启） | `codex/auto/gpt-6.2-sol` | `xhigh` | `auto` | `{ "service_tier": "default" }` | 深度 Code Review、架构风险/边界条件/安全审计，只审查提意见不改代码 |
-| `qa` | 测试与验收 | 否（按需开启） | `codex/auto/gpt-6.2-sol` | `xhigh` | `full-access` | `{ "service_tier": "default" }` | 编写单元/集成/E2E 测试、复现 Bug、跑回归验证 |
-| `explorer` | 代码库侦察员 | 否（按需开启） | `antigravity/gemini-4-hydrogen` | `medium` | `plan` | `{}` | 极速代码库检索、依赖梳理、日志定位、文档整理，节省主指挥上下文 |
+| `reviewer` | 代码审查官 | 否（按需开启） | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | 深度 Code Review、架构风险/边界条件/安全审计，只审查提意见不改代码 |
+| `qa` | 测试与验收 | 否（按需开启） | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | 编写单元/集成/E2E 测试、复现 Bug、跑回归验证 |
+| `explorer` | 代码库侦察员 | 否（按需开启） | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | 极速代码库检索、依赖梳理、日志定位、文档整理，节省主指挥上下文 |
 
 ---
 
@@ -119,6 +119,7 @@
       - `commanderExtraInstructions`: string（自定义补充指挥规范）
       - `members`: 成员配置数组（`id`, `roleId`, `name`, `enabled`, `provider`, `model`, `thinkingOptionId`, `modeId`, `features`, `responsibilities`, `rolePrompt`）
     - `workspaceOverrides`: `Record<string, { enabled?: boolean; presetId?: string }>`（按项目/工作区路径或 ID 覆盖默认行为）
+    - 内置成员使用 `provider: "auto"` 和空模型字段。服务端从当前宿主机实时 Provider 目录解析具体模型、Thinking、Mode 与 Provider options，避免依赖 Magpie 路由组或某个已安装 Provider。
   - 常量定义：
     - `METADATA_KEYS`:
       - `teamEnabled`: `"paseo-team-manager.enabled"`（`boolean`，单会话显式覆盖）
@@ -141,6 +142,8 @@
 ### 5.2 服务端（`index.server.ts` + `server/`）
 
 - `server.registerSettings(teamSettings)` 订阅并缓存最新配置。
+- `server/provider-catalog-cache.ts` 维护宿主机 Provider 目录的轻量内存缓存，首次使用最多等待 2 秒，Provider 目录变化时通过 `paseo.providers.subscribe` 失效并刷新。
+- `shared/catalog-defaults.ts` 根据角色偏好解析 `auto` 成员。解析会跳过高成本模型和 Antigravity 中的非 Gemini 模型，只有宿主机确实没有其他模型时才使用高成本候选，并为无法解析的角色保留清晰回退状态。
 - `server.addHook("agent.create.before", ...)`:
   - 仅当全局团队开关和当前目录或工作区均处于启用范围，且新创建会话显式携带 `paseo-team-manager.role` metadata 时，补齐/规范化关键默认参数（如 Codex `service_tier`、`modeId`、`thinkingOptionId`），不从标题推断角色，也不破坏显式覆盖。
 - `server.addHook("agent.open.before", ...)`:

@@ -1,4 +1,6 @@
 import type { AgentToolDefinition, PluginHookRequests } from "@getpaseo/plugin/server";
+import { resolvePresetMembers, resolveTeamMember } from "../shared/catalog-defaults.ts";
+import type { ProviderCatalogEntry } from "../shared/contracts.ts";
 import { findMemberByRole, isSubagentLabels, resolveEffectiveTeamConfig, resolveSubagentRoleId } from "../shared/policy.ts";
 import { buildCommanderPrompt, buildSubagentRolePrompt } from "../shared/prompt-builder.ts";
 import { LABEL_KEYS, METADATA_KEYS, type TeamSettingsValues } from "../shared/settings.ts";
@@ -7,6 +9,7 @@ export function applyAgentCreateBefore(
   request: PluginHookRequests["agent.create.before"],
   settings: TeamSettingsValues,
   homeDir: string,
+  catalogProviders: readonly ProviderCatalogEntry[] = [],
 ): PluginHookRequests["agent.create.before"] | undefined {
   if (!settings.enabled || !settings.enforceMemberDefaultsOnCreate) return;
   const { config, metadata } = request;
@@ -18,9 +21,12 @@ export function applyAgentCreateBefore(
   const effective = resolveEffectiveTeamConfig({ settings, cwd: config.cwd, metadata, homeDir });
   if (!effective.enabled) return;
   const match = findMemberByRole(settings, roleId, effective.presetId);
-  if (!match || config.provider !== match.member.provider) return;
+  if (!match) return;
+  const resolved = resolveTeamMember(match.member, catalogProviders, config.provider);
+  if (config.provider !== resolved.member.provider) return;
 
-  const { member, preset } = match;
+  const { member } = resolved;
+  const { preset } = match;
   const providerOptions = config.providerOptions ?? {};
   const missingFeatures = Object.entries(member.features).filter(([key]) =>
     !Object.prototype.hasOwnProperty.call(providerOptions, key) || providerOptions[key] === undefined,
@@ -29,7 +35,7 @@ export function applyAgentCreateBefore(
     ...request,
     config: {
       ...config,
-      ...(config.model === undefined ? { model: member.model } : {}),
+      ...(config.model === undefined && member.model ? { model: member.model } : {}),
       ...(config.modeId === undefined && member.modeId ? { modeId: member.modeId } : {}),
       ...(config.thinkingOptionId === undefined && member.thinkingOptionId ? { thinkingOptionId: member.thinkingOptionId } : {}),
       ...(missingFeatures.length ? { providerOptions: { ...providerOptions, ...Object.fromEntries(missingFeatures) } } : {}),
@@ -47,6 +53,7 @@ export function applyAgentOpenBefore(
   settings: TeamSettingsValues,
   rosterTool: AgentToolDefinition,
   homeDir: string,
+  catalogProviders: readonly ProviderCatalogEntry[] = [],
 ): PluginHookRequests["agent.open.before"] | undefined {
   if (request.purpose === "history" || request.background) return;
   const { labels, metadata, title, cwd, workspaceId } = request;
@@ -62,13 +69,15 @@ export function applyAgentOpenBefore(
     const labeledPreset = settings.presets.find((preset) => preset.id === labels[LABEL_KEYS.preset]?.trim());
     const match = findMemberByRole(settings, roleId, labeledPreset?.id ?? effective.presetId);
     if (!match) return;
-    return { ...request, appendSystemPrompt: [...prompts, buildSubagentRolePrompt({ ...match, cwd })] };
+    const resolved = resolveTeamMember(match.member, catalogProviders, request.provider);
+    return { ...request, appendSystemPrompt: [...prompts, buildSubagentRolePrompt({ preset: match.preset, member: resolved.member, cwd })] };
   }
 
   if (!effective.enabled) return;
+  const { resolved } = resolvePresetMembers(effective.preset, catalogProviders, request.provider);
   return {
     ...request,
-    appendSystemPrompt: [...prompts, buildCommanderPrompt({ preset: effective.preset, cwd, workspaceId })],
+    appendSystemPrompt: [...prompts, buildCommanderPrompt({ preset: effective.preset, cwd, workspaceId, resolvedMembers: resolved })],
     tools: [...request.tools, rosterTool],
   };
 }

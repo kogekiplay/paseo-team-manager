@@ -132,6 +132,9 @@ test("entry registers both hooks and all RPCs, uses a racing settings update and
 
   const catalog = getProviderCatalogRpc.output.parse(await call(getProviderCatalogRpc.name, { cwd, refresh: true }));
   assert.deepEqual(providerCalls, [
+    ["snapshot", { cwd }],
+    ["listControls", { provider: "codex/auto/gpt-6.2-sol", modeId: "full-access", cwd }],
+    ["listControls", { provider: "broken/model", modeId: undefined, cwd }],
     ["refresh", { cwd }], ["snapshot", { cwd }],
     ["listControls", { provider: "codex/auto/gpt-6.2-sol", modeId: "full-access", cwd }],
     ["listControls", { provider: "broken/model", modeId: undefined, cwd }],

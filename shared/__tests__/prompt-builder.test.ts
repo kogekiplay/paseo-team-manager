@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { resolvePresetMembers } from "../catalog-defaults.ts";
 import { buildCommanderPrompt, buildMemberCreateAgentParams, buildSubagentRolePrompt } from "../prompt-builder.ts";
-import { createDefaultPresets } from "../settings.ts";
+import { createDefaultPresets, type TeamPreset } from "../settings.ts";
+
+const catalog = [
+  { provider: "codex", label: "Codex", enabled: true, status: "ready" as const, defaultModeId: "full-access", modes: [{ id: "full-access", label: "Full Access" }], models: [{ id: "auto/gpt-6.2-sol", label: "Sol", isDefault: true, thinkingOptions: [{ id: "xhigh", label: "XHigh", isDefault: true }] }], controls: [{ type: "select" as const, key: "service_tier", label: "Speed", choices: [{ value: "default", label: "Default" }] }] },
+  { provider: "antigravity", label: "Antigravity", enabled: true, status: "ready" as const, defaultModeId: "full-access", modes: [{ id: "full-access", label: "Full Access" }], models: [{ id: "gemini-4-neon", label: "Neon", isDefault: true, thinkingOptions: [{ id: "high", label: "High", isDefault: true }] }, { id: "gemini-4-hydrogen", label: "Hydrogen", thinkingOptions: [{ id: "medium", label: "Medium", isDefault: true }] }], controls: [] },
+];
 
 test("the commander gets copyable native tool parameters for enabled members", () => {
   const [preset] = createDefaultPresets();
-  const prompt = buildCommanderPrompt({ preset, cwd: "/tmp/project", workspaceId: "ws-123" });
+  const resolvedMembers = resolvePresetMembers(preset, catalog).resolved;
+  const prompt = buildCommanderPrompt({ preset, resolvedMembers, cwd: "/tmp/project", workspaceId: "ws-123" });
   assert.match(prompt, /当前工作区项目指挥（Commander）/);
   assert.match(prompt, /禁止直接修改项目业务源码文件/);
   assert.match(prompt, /\/tmp\/project/);
@@ -50,9 +57,9 @@ test("commander can make small changes when configured and receives trimmed extr
 
 test("the member template omits blank options and supplies a title prefix", () => {
   const [preset] = createDefaultPresets();
-  const member = { ...preset.members[0], modeId: "", thinkingOptionId: "", features: {} };
+  const member = { ...preset.members[0], provider: "codex", model: "gpt-5.4", modeId: "", thinkingOptionId: "", features: {} };
   assert.deepEqual(buildMemberCreateAgentParams(member, preset.id), {
-    provider: "codex/auto/gpt-6.2-sol",
+    provider: "codex/gpt-5.4",
     settings: {},
     labels: { "paseo-team-manager.role": "backend", "paseo-team-manager.preset": "default-fullstack" },
     recommendedTitlePrefix: "[backend] ",

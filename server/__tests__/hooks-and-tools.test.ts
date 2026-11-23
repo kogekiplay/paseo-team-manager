@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
 import type { PluginHookRequests } from "@getpaseo/plugin/server";
+import type { ProviderCatalogEntry } from "../../shared/contracts.ts";
 import {
   createDefaultPresets, DEFAULT_TEAM_SETTINGS, LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL, parseTeamSettings,
 } from "../../shared/settings.ts";
@@ -13,6 +14,12 @@ const cwd = `${homeDir}/src/example`;
 const workspaceId = "workspace-1";
 const settings = DEFAULT_TEAM_SETTINGS;
 const tool = createRosterTool(() => settings, homeDir);
+const codexCatalog: ProviderCatalogEntry[] = [{
+  provider: "codex", label: "Codex", enabled: true, status: "ready", defaultModeId: "full-access",
+  modes: [{ id: "full-access", label: "Full Access" }, { id: "auto", label: "Auto" }],
+  models: [{ id: "auto/gpt-6.2-sol", label: "Sol", isDefault: true, thinkingOptions: [{ id: "xhigh", label: "XHigh", isDefault: true }] }],
+  controls: [{ type: "select", key: "service_tier", label: "Speed", choices: [{ value: "default", label: "Default" }] }],
+}];
 const openRequest: PluginHookRequests["agent.open.before"] = {
   agentId: "commander", workspaceId, cwd, provider: "codex", reason: "create", purpose: "interactive",
   title: null, background: false, labels: {}, metadata: {}, tools: [], env: {}, mcpServers: {},
@@ -25,7 +32,7 @@ test("create fills missing defaults and role metadata without changing cwd or th
     metadata: { [METADATA_KEYS.roleId]: "BACKEND" },
     env: { EXISTING: "value" },
   };
-  const result = applyAgentCreateBefore(request, settings, homeDir);
+  const result = applyAgentCreateBefore(request, settings, homeDir, codexCatalog);
   assert.deepEqual(result, {
     ...request,
     config: {
@@ -49,18 +56,18 @@ test("create preserves explicit options and chooses the metadata role and prefer
     },
     metadata: { [METADATA_KEYS.roleId]: "BACKEND", [METADATA_KEYS.presetId]: "alternate", retained: true },
   };
-  const result = applyAgentCreateBefore(request, configured, homeDir);
+  const result = applyAgentCreateBefore(request, configured, homeDir, codexCatalog);
   assert.deepEqual(result, {
     metadata: request.metadata,
-    config: { ...request.config, model: "auto/gpt-6.1-terra", providerOptions: { ...request.config.providerOptions, trace: true } },
+    config: { ...request.config, model: "auto/gpt-6.2-sol" },
   });
   const byDirectory = applyAgentCreateBefore({
     config: { provider: "codex", cwd, title: "[backend] scope" },
     metadata: { [METADATA_KEYS.roleId]: "backend" },
-  }, configured, homeDir);
+  }, configured, homeDir, codexCatalog);
   assert.equal(byDirectory?.metadata?.[METADATA_KEYS.presetId], "alternate");
-  assert.equal(byDirectory?.config.model, "auto/gpt-6.1-terra");
-  const withExplicitModel = applyAgentCreateBefore({ config: { ...request.config, model: "caller-model" }, metadata: request.metadata }, configured, homeDir);
+  assert.equal(byDirectory?.config.model, "auto/gpt-6.2-sol");
+  const withExplicitModel = applyAgentCreateBefore({ config: { ...request.config, model: "caller-model" }, metadata: request.metadata }, configured, homeDir, codexCatalog);
   assert.equal(withExplicitModel?.config.model, "caller-model");
 });
 
@@ -70,30 +77,30 @@ test("create skips ordinary and unknown titles, provider mismatches and disabled
     { config: { ...config, title: "普通对话" } },
     { config: { ...config, title: "[unknown] 普通对话" } },
     { config: { ...config, title: "[frontend] provider mismatch" } },
-  ]) assert.equal(applyAgentCreateBefore(request, settings, homeDir), undefined);
+  ]) assert.equal(applyAgentCreateBefore(request, settings, homeDir, codexCatalog), undefined);
   for (const off of [{ enabled: false }, { enforceMemberDefaultsOnCreate: false }]) {
-    assert.equal(applyAgentCreateBefore({ config }, { ...settings, ...off }, homeDir), undefined);
+    assert.equal(applyAgentCreateBefore({ config }, { ...settings, ...off }, homeDir, codexCatalog), undefined);
   }
 });
 
 test("create requires explicit role metadata and an enabled directory scope", () => {
-  assert.equal(applyAgentCreateBefore({ config: { provider: "codex", cwd, title: "[backend] Fix tests" } }, settings, homeDir), undefined);
+  assert.equal(applyAgentCreateBefore({ config: { provider: "codex", cwd, title: "[backend] Fix tests" } }, settings, homeDir, codexCatalog), undefined);
   const excluded = parseTeamSettings({ excludedDirectories: ["~/src"] });
   assert.equal(applyAgentCreateBefore({
     config: { provider: "codex", cwd, title: "[backend] Fix tests" },
     metadata: { [METADATA_KEYS.roleId]: "backend" },
-  }, excluded, homeDir), undefined);
+  }, excluded, homeDir, codexCatalog), undefined);
   const workspaceDisabled = parseTeamSettings({ workspaceOverrides: { "~/src/example": { enabled: false } } });
   assert.equal(applyAgentCreateBefore({
     config: { provider: "codex", cwd, title: "[backend] Fix tests" },
     metadata: { [METADATA_KEYS.roleId]: "backend" },
-  }, workspaceDisabled, homeDir), undefined);
+  }, workspaceDisabled, homeDir, codexCatalog), undefined);
 });
 
 test("open skips history and background and adds the commander prompt and roster to an interactive top-level agent", () => {
   assert.equal(applyAgentOpenBefore({ ...openRequest, purpose: "history" }, settings, tool, homeDir), undefined);
   assert.equal(applyAgentOpenBefore({ ...openRequest, background: true }, settings, tool, homeDir), undefined);
-  const result = applyAgentOpenBefore({ ...openRequest, appendSystemPrompt: ["Existing prompt"] }, settings, tool, homeDir);
+  const result = applyAgentOpenBefore({ ...openRequest, appendSystemPrompt: ["Existing prompt"] }, settings, tool, homeDir, codexCatalog);
   assert.deepEqual(result?.tools, [tool]);
   assert.equal(result?.tools[0].name, "team_get_roster");
   assert.equal(result?.appendSystemPrompt?.[0], "Existing prompt");
@@ -109,26 +116,26 @@ test("open gives identified children only role instructions and preserves the ex
     ...openRequest, labels: { ...parentLabel, [LABEL_KEYS.role]: "FRONTEND", [LABEL_KEYS.preset]: "alternate" },
     title: "[qa] task", metadata: { [METADATA_KEYS.roleId]: "backend", [METADATA_KEYS.presetId]: preset.id },
   };
-  const result = applyAgentOpenBefore(request, configured, tool, homeDir);
+  const result = applyAgentOpenBefore(request, configured, tool, homeDir, codexCatalog);
   assert.equal(result?.tools, request.tools);
   assert.match(result?.appendSystemPrompt?.[0] ?? "", /前端开发[\s\S]*Custom role prompt/);
   assert.doesNotMatch(result?.appendSystemPrompt?.[0] ?? "", /Commander|team_get_roster/);
-  assert.equal(applyAgentOpenBefore({ ...openRequest, labels: parentLabel }, settings, tool, homeDir), undefined);
+  assert.equal(applyAgentOpenBefore({ ...openRequest, labels: parentLabel }, settings, tool, homeDir, codexCatalog), undefined);
   assert.equal(applyAgentOpenBefore({
     ...openRequest,
     labels: { ...parentLabel, [LABEL_KEYS.role]: "backend" },
     cwd: `${homeDir}/src/ignored`,
-  }, parseTeamSettings({ excludedDirectories: ["~/src"] }), tool, homeDir), undefined);
-  assert.equal(applyAgentOpenBefore(request, { ...configured, enabled: false }, tool, homeDir), undefined);
+  }, parseTeamSettings({ excludedDirectories: ["~/src"] }), tool, homeDir, codexCatalog), undefined);
+  assert.equal(applyAgentOpenBefore(request, { ...configured, enabled: false }, tool, homeDir, codexCatalog), undefined);
 });
 
 test("open respects an explicit session opt-out and exclusions", () => {
   const excluded = parseTeamSettings({ excludedDirectories: ["~/src/"] });
-  assert.equal(applyAgentOpenBefore(openRequest, excluded, tool, homeDir), undefined);
+  assert.equal(applyAgentOpenBefore(openRequest, excluded, tool, homeDir, codexCatalog), undefined);
   const request = { ...openRequest, metadata: { [METADATA_KEYS.teamEnabled]: false } };
-  assert.equal(applyAgentOpenBefore(request, settings, tool, homeDir), undefined);
+  assert.equal(applyAgentOpenBefore(request, settings, tool, homeDir, codexCatalog), undefined);
   const override = { ...request, metadata: { [METADATA_KEYS.teamEnabled]: true } };
-  assert.deepEqual(applyAgentOpenBefore(override, excluded, tool, homeDir)?.tools, [tool]);
+  assert.deepEqual(applyAgentOpenBefore(override, excluded, tool, homeDir, codexCatalog)?.tools, [tool]);
 });
 
 test("roster returns current settings, native create parameters and live team children across pages", async () => {
@@ -155,7 +162,7 @@ test("roster returns current settings, native create parameters and live team ch
   } as unknown as PaseoApi;
   const [preset] = createDefaultPresets();
   let currentSettings = settings;
-  const liveTool = createRosterTool(() => currentSettings, homeDir);
+  const liveTool = createRosterTool(() => currentSettings, homeDir, { ensureFresh: async () => codexCatalog });
   currentSettings = parseTeamSettings({ defaultPresetId: "updated", presets: [{ ...preset, id: "updated" }] });
   const context = {
     paseo, signal: new AbortController().signal,

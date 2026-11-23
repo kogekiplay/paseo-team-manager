@@ -1,9 +1,12 @@
-import { LABEL_KEYS, formatProviderModel, type TeamMember, type TeamPreset } from "./settings.ts";
+import type { ResolvedTeamMember } from "./catalog-defaults.ts";
+import { AUTO_PROVIDER, LABEL_KEYS, formatProviderModel, type TeamMember, type TeamPreset } from "./settings.ts";
 
 export function buildMemberCreateAgentParams(member: TeamMember, presetId: string) {
   const { modeId, thinkingOptionId, features, roleId } = member;
   return {
-    provider: formatProviderModel(member.provider, member.model),
+    provider: member.provider === AUTO_PROVIDER
+      ? "<请先调用 list_providers / list_models 选择当前宿主机可用模型>"
+      : formatProviderModel(member.provider, member.model),
     settings: {
       ...(modeId ? { modeId } : {}),
       ...(thinkingOptionId ? { thinkingOptionId } : {}),
@@ -14,10 +17,11 @@ export function buildMemberCreateAgentParams(member: TeamMember, presetId: strin
   };
 }
 
-export function buildCommanderPrompt({ preset, cwd, workspaceId }: {
+export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers }: {
   preset: TeamPreset;
   cwd?: string | null;
   workspaceId?: string | null;
+  resolvedMembers?: readonly ResolvedTeamMember[];
 }): string {
   const lines = [
     "## 当前工作区项目指挥（Commander）",
@@ -35,9 +39,15 @@ export function buildCommanderPrompt({ preset, cwd, workspaceId }: {
     "### 已启用的团队成员",
   ];
 
-  const active = preset.members.filter((member) => member.enabled);
+  const active = (resolvedMembers ?? preset.members.map((member) => ({
+    member,
+    configured: member,
+    status: "explicit" as const,
+    fallbackReason: null,
+  }))).filter(({ member }) => member.enabled);
   if (active.length === 0) lines.push("", "当前预设没有已启用成员。");
-  for (const member of active) {
+  for (const resolved of active) {
+    const member = resolved.member;
     const { provider, settings, labels, recommendedTitlePrefix } = buildMemberCreateAgentParams(member, preset.id);
     const params = {
       provider, settings, labels, title: `${recommendedTitlePrefix}任务标题`,
@@ -45,6 +55,7 @@ export function buildCommanderPrompt({ preset, cwd, workspaceId }: {
     };
     lines.push("", `#### ${member.name}（\`${member.roleId}\`）`);
     if (member.responsibilities.trim()) lines.push("", member.responsibilities.trim());
+    if (resolved.fallbackReason) lines.push("", `> 配置解析状态：${resolved.status}。${resolved.fallbackReason}`);
     lines.push("", "```json", JSON.stringify(params, null, 2), "```");
   }
 

@@ -2,6 +2,8 @@ import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
 import { defineAgentTool } from "@getpaseo/plugin/server";
 import { z } from "zod";
 import type { WorkspaceTeamAgent } from "../shared/contracts.ts";
+import type { ProviderCatalogEntry } from "../shared/contracts.ts";
+import { resolvePresetMembers, summarizeResolvedMember } from "../shared/catalog-defaults.ts";
 import { isSubagentLabels, normalizeDirectoryPath, resolveEffectiveTeamConfig, resolveSubagentRoleId } from "../shared/policy.ts";
 import { buildMemberCreateAgentParams } from "../shared/prompt-builder.ts";
 import { LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL, type TeamSettingsValues } from "../shared/settings.ts";
@@ -58,7 +60,11 @@ export function toWorkspaceTeamAgent(agent: PaseoAgent): WorkspaceTeamAgent {
   };
 }
 
-export function createRosterTool(getSettings: () => TeamSettingsValues, homeDir: string) {
+export function createRosterTool(
+  getSettings: () => TeamSettingsValues,
+  homeDir: string,
+  catalogCache?: { ensureFresh(paseo: PaseoApi, options?: { cwd?: string; timeoutMs?: number }): Promise<readonly ProviderCatalogEntry[]> },
+) {
   return defineAgentTool({
     name: "team_get_roster",
     title: "当前工作区团队名册",
@@ -67,12 +73,17 @@ export function createRosterTool(getSettings: () => TeamSettingsValues, homeDir:
     async execute(_input, { agent, paseo }) {
       const settings = getSettings();
       const { workspaceId, cwd } = agent;
+      const catalogProviders = catalogCache ? await catalogCache.ensureFresh(paseo, { cwd }) : [];
       const { preset, presetId, enabled, source, excludedByDirectory } = resolveEffectiveTeamConfig({
         settings, workspaceId, cwd, metadata: agent.metadata, homeDir,
       });
-      const members = preset.members.map((member) => ({
-        ...member,
-        createAgentParams: buildMemberCreateAgentParams(member, presetId),
+      const { resolved } = resolvePresetMembers(preset, catalogProviders, agent.provider);
+      const members = resolved.map((item) => ({
+        ...summarizeResolvedMember(item),
+        name: item.member.name,
+        enabled: item.member.enabled,
+        responsibilities: item.member.responsibilities,
+        createAgentParams: buildMemberCreateAgentParams(item.member, presetId),
       }));
 
       const listing = await listWorkspaceAgents(paseo, { workspaceId, cwd, homeDir })
@@ -88,8 +99,8 @@ export function createRosterTool(getSettings: () => TeamSettingsValues, homeDir:
         `团队模式 ${enabled ? "已开启" : "已关闭"}。`,
         "",
         "### 团队成员",
-        ...members.map(({ name, roleId, enabled: memberEnabled, responsibilities, createAgentParams }) =>
-          `- ${name}（\`${roleId}\`，${memberEnabled ? "已启用" : "可选"}）${responsibilities ? ` · ${responsibilities}` : ""}\n  \`${JSON.stringify(createAgentParams)}\``),
+        ...members.map(({ name, roleId, enabled: memberEnabled, responsibilities, createAgentParams, status, fallbackReason }) =>
+          `- ${name}（\`${roleId}\`，${memberEnabled ? "已启用" : "可选"}，${status}）${responsibilities ? ` · ${responsibilities}` : ""}\n  \`${JSON.stringify(createAgentParams)}\`${fallbackReason ? `\n  提示：${fallbackReason}` : ""}`),
         "",
         "### 工作区团队子智能体",
         ...(agentListError !== null
@@ -100,7 +111,7 @@ export function createRosterTool(getSettings: () => TeamSettingsValues, homeDir:
       ].join("\n");
       return {
         text,
-        structuredContent: { workspaceId, cwd, enabled, source, excludedByDirectory, presetId, preset, members, agents, agentListError },
+        structuredContent: { workspaceId, cwd, enabled, source, excludedByDirectory, presetId, preset, members, resolvedMembers: members, agents, agentListError },
       };
     },
   });

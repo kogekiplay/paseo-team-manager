@@ -18,13 +18,13 @@ The default full-stack preset includes two active members and three optional mem
 
 | Role | Provider and model | Thinking | Mode |
 | --- | --- | --- | --- |
-| Backend | `codex/auto/gpt-6.2-sol` | `xhigh` | `full-access` |
-| Frontend | `antigravity/gemini-4-neon` | `high` | `full-access` |
-| Reviewer | `codex/auto/gpt-6.2-sol` | `xhigh` | `auto` |
-| QA | `codex/auto/gpt-6.2-sol` | `xhigh` | `full-access` |
-| Explorer | `antigravity/gemini-4-hydrogen` | `medium` | `plan` |
+| Backend | `auto` host-adaptive | host-adaptive | host-adaptive |
+| Frontend | `auto` host-adaptive | host-adaptive | host-adaptive |
+| Reviewer | `auto` host-adaptive | host-adaptive | host-adaptive |
+| QA | `auto` host-adaptive | host-adaptive | host-adaptive |
+| Explorer | `auto` host-adaptive | host-adaptive | host-adaptive |
 
-Codex members use the default `service_tier` provider option. Optional roles start disabled and can be enabled in the team settings.
+The default preset stores `provider: "auto"` and resolves each role against the host's ready Provider catalog. On a typical Magpie-enabled host, backend and QA resolve to Codex `auto/gpt-6.2-sol` with `xhigh`, frontend resolves to Antigravity `gemini-4-neon`, and explorer resolves to Antigravity `gemini-4-hydrogen`. Native Codex, Claude Code, Antigravity-only, and other ready providers receive supported fallbacks. Optional roles start disabled and can be enabled in the team settings.
 
 The global team switch is a hard gate. When it is disabled, session metadata and workspace overrides cannot enable team behavior. Creation defaults apply only when team mode is enabled for the current directory or workspace and the new agent explicitly carries the team role metadata.
 

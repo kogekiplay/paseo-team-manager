@@ -24,28 +24,26 @@ test("the host setting defines the full default team and independent snapshots",
   assert.equal(defaultPresetId, "default-fullstack");
   assert.equal(preset.id, defaultPresetId);
   assert.equal(preset.name, "全栈开发团队");
+  assert.equal(preset.description, "自动适配当前宿主机可用模型，指挥统筹派发不直接改代码");
   assert.equal(preset.commanderNoDirectEdit, true);
   assert.deepEqual(preset.members.map(({ roleId, enabled, provider, model, thinkingOptionId, modeId, features }) =>
-    [roleId, enabled, formatProviderModel(provider, model), thinkingOptionId, modeId, features]), [
-    ["backend", true, "codex/auto/gpt-6.2-sol", "xhigh", "full-access", { service_tier: "default" }],
-    ["frontend", true, "antigravity/gemini-4-neon", "high", "full-access", {}],
-    ["reviewer", false, "codex/auto/gpt-6.2-sol", "xhigh", "auto", { service_tier: "default" }],
-    ["qa", false, "codex/auto/gpt-6.2-sol", "xhigh", "full-access", { service_tier: "default" }],
-    ["explorer", false, "antigravity/gemini-4-hydrogen", "medium", "plan", {}],
+    [roleId, enabled, provider, model, thinkingOptionId, modeId, features]), [
+    ["backend", true, "auto", "", "", "", {}],
+    ["frontend", true, "auto", "", "", "", {}],
+    ["reviewer", false, "auto", "", "", "", {}],
+    ["qa", false, "auto", "", "", "", {}],
+    ["explorer", false, "auto", "", "", "", {}],
   ]);
   assert.ok(preset.members.every((member) => member.responsibilities && member.rolePrompt));
   assert.deepEqual(new Set(preset.members.map((member) => formatProviderModel(member.provider, member.model))), new Set([
-    "codex/auto/gpt-6.2-sol",
-    "antigravity/gemini-4-neon",
-    "codex/auto/gpt-6.2-sol",
-    "antigravity/gemini-4-hydrogen",
+    "auto",
   ]));
   const independent = parseTeamSettings({});
   independent.presets[0].members[0].features.service_tier = "priority";
   independent.presets[0].members.pop();
   assert.deepEqual(parseTeamSettings({}).presets, createDefaultPresets());
   assert.equal(createDefaultPresets()[0].members.length, 5);
-  assert.equal(createDefaultPresets()[0].members[0].features.service_tier, "default");
+  assert.deepEqual(createDefaultPresets()[0].members[0].features, {});
 });
 
 test("settings migration replaces legacy high-cost models while preserving custom settings", () => {
@@ -77,11 +75,12 @@ test("settings validate required fields, role IDs, feature values and preset pre
   const member = { id: " custom ", roleId: " Api-v2 ", name: " API ", provider: " codex ", model: " model " };
   assert.deepEqual(TeamMemberSchema.parse(member), {
     id: "custom", roleId: "Api-v2", name: "API", provider: "codex", model: "model", enabled: true,
-    thinkingOptionId: "", modeId: "full-access", features: {}, responsibilities: "", rolePrompt: "",
+    thinkingOptionId: "", modeId: "", features: {}, responsibilities: "", rolePrompt: "",
   });
   assert.equal(TeamMemberSchema.safeParse({ ...member, roleId: "bad role" }).success, false);
   assert.equal(TeamMemberSchema.safeParse({ ...member, features: { bad: [] } }).success, false);
   assert.equal(TeamMemberSchema.safeParse({ ...member, model: " " }).success, false);
+  assert.deepEqual(TeamMemberSchema.parse({ ...member, provider: "auto", model: "" }).model, "");
   assert.throws(() => parseTeamSettings({ presets: [] }));
   assert.throws(() => parseTeamSettings({ enabled: "true" }));
 });
