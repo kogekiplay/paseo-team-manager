@@ -19,10 +19,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
   getWorkspaceTeamStateRpc,
+  type ResolvedMemberSummary,
   type WorkspaceTeamAgent,
   type WorkspaceTeamStateOutput,
 } from "../shared/contracts.ts";
-import { formatProviderModel, METADATA_KEYS } from "../shared/settings.ts";
+import { TEAM_MANAGER_ICON } from "../shared/icon.ts";
+import {
+  AUTO_PROVIDER,
+  formatProviderModel,
+  METADATA_KEYS,
+} from "../shared/settings.ts";
 import { messages } from "./messages.ts";
 import {
   openPluginSettings,
@@ -30,6 +36,7 @@ import {
   useTeamSettingsStore,
 } from "./settings-store.ts";
 import {
+  formatMemberConfigSummary,
   formatMemberSummary,
   localizeModeLabel,
   localizeThinkingLabel,
@@ -256,6 +263,16 @@ function TeamPanelView({
     [state],
   );
 
+  const resolvedByMemberId = useMemo(() => {
+    const map = new Map<Str, ResolvedMemberSummary>();
+    if (state?.resolvedMembers) {
+      for (const item of state.resolvedMembers) {
+        map.set(item.memberId, item);
+      }
+    }
+    return map;
+  }, [state]);
+
   const sortedAgents = useMemo(
     () => (state ? sortWorkspaceAgents(state.agents) : []),
     [state],
@@ -349,6 +366,10 @@ function TeamPanelView({
           backgroundColor: theme.colors.surface2,
           borderColor: theme.colors.accent,
         },
+        pillWarning: {
+          backgroundColor: theme.colors.surface2,
+          borderColor: theme.colors.statusWarning,
+        },
         pillTextSuccess: {
           color: theme.colors.statusSuccess,
           fontSize: 12,
@@ -361,6 +382,11 @@ function TeamPanelView({
         },
         pillTextAccent: {
           color: theme.colors.accent,
+          fontSize: 12,
+          fontWeight: "600",
+        },
+        pillTextWarning: {
+          color: theme.colors.statusWarning,
           fontSize: 12,
           fontWeight: "600",
         },
@@ -492,7 +518,11 @@ function TeamPanelView({
       <View style={styles.card}>
         <View style={styles.headerRow}>
           <View style={styles.headerTitleRow}>
-            <Icon name="Users" size={18} color={theme.colors.foreground} />
+            <Icon
+              icon={TEAM_MANAGER_ICON}
+              size={18}
+              color={theme.colors.foreground}
+            />
             <Text style={styles.titleText}>
               {workspaceInfo?.name ??
                 (agentId ? t("panel.title") : t("panel.workspaceTitle"))}
@@ -722,24 +752,57 @@ function TeamPanelView({
           <Text style={styles.mutedText}>{t("panel.noMembers")}</Text>
         ) : (
           <View style={styles.listGap}>
-            {activeMembers.map((member) => (
-              <View key={member.id} style={styles.itemCard}>
-                <View style={styles.itemTitleRow}>
-                  <Text style={styles.itemTitle}>{member.name}</Text>
-                  <View style={[styles.pillBadge, styles.pillEnabled]}>
-                    <Text style={styles.pillTextSuccess}>{member.roleId}</Text>
+            {activeMembers.map((member) => {
+              const resolved = resolvedByMemberId.get(member.id);
+              const isFallback =
+                resolved?.status === "fallback-host" ||
+                resolved?.status === "fallback-caller";
+              const summaryText =
+                resolved && resolved.provider !== AUTO_PROVIDER
+                  ? formatMemberConfigSummary(resolved, locale)
+                  : member.provider === AUTO_PROVIDER
+                    ? t("panel.autoUnresolvedHint")
+                    : formatMemberSummary(member, locale);
+              return (
+                <View key={member.id} style={styles.itemCard}>
+                  <View style={styles.itemTitleRow}>
+                    <Text style={styles.itemTitle}>{member.name}</Text>
+                    <View style={[styles.pillBadge, styles.pillEnabled]}>
+                      <Text style={styles.pillTextSuccess}>{member.roleId}</Text>
+                    </View>
+                    {resolved?.status === "auto-matched" ? (
+                      <View style={[styles.pillBadge, styles.pillAccent]}>
+                        <Text style={styles.pillTextAccent}>
+                          {t("panel.autoBadge")}
+                        </Text>
+                      </View>
+                    ) : isFallback ? (
+                      <View style={[styles.pillBadge, styles.pillWarning]}>
+                        <Text style={styles.pillTextWarning}>
+                          {t("panel.fallbackBadge")}
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
+                  <Text style={styles.infoLine}>{summaryText}</Text>
+                  {isFallback && resolved ? (
+                    <Text style={styles.warningText}>
+                      {t("panel.fallbackHint", {
+                        configured: formatProviderModel(
+                          resolved.configuredProvider,
+                          resolved.configuredModel,
+                        ),
+                      })}
+                    </Text>
+                  ) : null}
+                  {member.responsibilities.trim() ? (
+                    <Text style={styles.mutedText}>
+                      {member.responsibilities.trim()}
+                    </Text>
+                  ) : null}
                 </View>
-                <Text style={styles.infoLine}>
-                  {formatMemberSummary(member, locale)}
-                </Text>
-                {member.responsibilities.trim() ? (
-                  <Text style={styles.mutedText}>
-                    {member.responsibilities.trim()}
-                  </Text>
-                ) : null}
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
 
@@ -751,19 +814,52 @@ function TeamPanelView({
               })}
             </Text>
             <View style={styles.listGap}>
-              {optionalMembers.map((member) => (
-                <View key={member.id} style={styles.itemCard}>
-                  <View style={styles.itemTitleRow}>
-                    <Text style={styles.itemTitle}>{member.name}</Text>
-                    <View style={[styles.pillBadge, styles.pillDisabled]}>
-                      <Text style={styles.pillTextMuted}>{member.roleId}</Text>
+              {optionalMembers.map((member) => {
+                const resolved = resolvedByMemberId.get(member.id);
+                const isFallback =
+                  resolved?.status === "fallback-host" ||
+                  resolved?.status === "fallback-caller";
+                const summaryText =
+                  resolved && resolved.provider !== AUTO_PROVIDER
+                    ? formatMemberConfigSummary(resolved, locale)
+                    : member.provider === AUTO_PROVIDER
+                      ? t("panel.autoUnresolvedHint")
+                      : formatMemberSummary(member, locale);
+                return (
+                  <View key={member.id} style={styles.itemCard}>
+                    <View style={styles.itemTitleRow}>
+                      <Text style={styles.itemTitle}>{member.name}</Text>
+                      <View style={[styles.pillBadge, styles.pillDisabled]}>
+                        <Text style={styles.pillTextMuted}>{member.roleId}</Text>
+                      </View>
+                      {resolved?.status === "auto-matched" ? (
+                        <View style={[styles.pillBadge, styles.pillAccent]}>
+                          <Text style={styles.pillTextAccent}>
+                            {t("panel.autoBadge")}
+                          </Text>
+                        </View>
+                      ) : isFallback ? (
+                        <View style={[styles.pillBadge, styles.pillWarning]}>
+                          <Text style={styles.pillTextWarning}>
+                            {t("panel.fallbackBadge")}
+                          </Text>
+                        </View>
+                      ) : null}
                     </View>
+                    <Text style={styles.mutedText}>{summaryText}</Text>
+                    {isFallback && resolved ? (
+                      <Text style={styles.warningText}>
+                        {t("panel.fallbackHint", {
+                          configured: formatProviderModel(
+                            resolved.configuredProvider,
+                            resolved.configuredModel,
+                          ),
+                        })}
+                      </Text>
+                    ) : null}
                   </View>
-                  <Text style={styles.mutedText}>
-                    {formatMemberSummary(member, locale)}
-                  </Text>
-                </View>
-              ))}
+                );
+              })}
             </View>
           </>
         ) : null}

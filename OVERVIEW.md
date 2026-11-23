@@ -1,4 +1,4 @@
-Paseo Team Manager equips top-level Paseo sessions with team commander instructions, configurable role presets, and live team status controls so each project session automatically knows how to coordinate role-based subagents.
+Paseo Team Manager equips top-level Paseo sessions with team commander instructions, adaptive role presets, and live team status controls so each project session automatically knows how to coordinate role-based subagents.
 
 ## How it works
 
@@ -9,28 +9,28 @@ When an agent session opens, Paseo Team Manager inspects its labels and metadata
 
 Commanders delegate work through Paseo's native `create_agent` and `send_agent_prompt` MCP tools rather than custom wrapper tools. This preserves Paseo's built-in Subagents track, `notifyOnFinish` completion wakeups, and message queueing. When `enforceMemberDefaultsOnCreate` is enabled and team mode is active for that scope, the `agent.create.before` hook fills in omitted model, session mode, thinking level, or provider options only for sessions that explicitly declare a role via `paseo-team-manager.role` metadata, leaving ordinary unassigned sessions and their permission modes unchanged.
 
+### Zero-config host auto-matching
+
+All roles in the built-in full-stack preset (`backend`, `frontend`, `reviewer`, `qa`, `explorer`) default to `provider: "auto"`. At runtime, the plugin inspects the live catalog of enabled and ready providers on the connected host and picks a real available model, thinking level, session mode, and provider option set for each role.
+
+- Works across Magpie routing groups, native Codex, Claude Code, Antigravity, and other custom providers configured on your host.
+- Automatically avoids high-cost models such as `astra` and `fable` during auto-matching and appends `service_tier: "default"` only when the host provider actually exposes that control.
+- If a locked provider or model is unavailable on a different machine, the runtime falls back to an available host model (or the caller's provider) without overwriting your saved preset, and offers a one-click Apply fallback action in settings.
+
 ## Setup and requirements
 
 Requires Paseo 0.17.1 or later. Client controls and panels are built with cross-platform React Native primitives and work on desktop, web, iOS, and Android.
 
-Open Team Manager from the sidebar header, open Settings > Plugins > Team Manager, or run `/team settings` in a workspace composer to review the default full-stack team preset, adjust roles using the live provider and model catalog from your host, or exclude casual directories such as `~/Downloads`.
-
-The built-in full-stack preset includes two enabled core roles and three optional roles using Codex GPT routing groups and Antigravity Gemini 4 models:
-
-- `backend` (enabled): `codex/auto/gpt-6.2-sol`, thinking `xhigh`, mode `full-access`, `service_tier: "default"`.
-- `frontend` (enabled): `antigravity/gemini-4-neon`, thinking `high`, mode `full-access`.
-- `reviewer` (optional): `codex/auto/gpt-6.2-sol`, thinking `xhigh`, mode `auto`, `service_tier: "default"`.
-- `qa` (optional): `codex/auto/gpt-6.2-sol`, thinking `xhigh`, mode `full-access`, `service_tier: "default"`.
-- `explorer` (optional): `antigravity/gemini-4-hydrogen`, thinking `medium`, mode `plan`.
+Open Team Manager from the sidebar header, open Settings > Plugins > Team Manager, or run `/team settings` in a workspace composer. All changes save automatically. You can keep roles on Auto-match for portable multi-machine setups, lock all roles to your current host's recommended models with one click, or customize any role individually.
 
 ## Capabilities and settings
 
-- General toggles: enable or disable the plugin globally, control whether new top-level sessions auto-enable commander mode, show or hide the composer team selector, and automatically fill missing role defaults when subagents are created.
+- General toggles: enable or disable the plugin globally, control whether new top-level sessions auto-enable commander mode, show or hide the composer team selector, and automatically fill missing role defaults when role subagents are created.
 - Excluded directories: skip automatic commander mode in selected directories (supporting `~/...` and absolute paths), with a one-click shortcut for `~/Downloads`.
 - Team presets: manage multiple team templates, choose a default preset, toggle the "commander must not edit source code directly" rule, and append custom commander instructions.
-- Team members: enable or disable built-in roles, add or remove custom roles, and pick each role's provider, model, thinking level, session mode, and dynamic provider options (such as Codex `service_tier` or `plan_mode`) directly from the host catalog.
-- Live commander prompt preview: inspect and copy the exact Markdown system prompt that will be appended to commanders.
-- Composer, panel, and command controls: keep Paseo's native Subagents pill track untouched while switching team mode per session from the composer selector (`Auto`, `Off`, or a specific preset), opening the Team Status or Workspace Team panel from Command Center or `/team`, reloading an idle session to apply updated instructions immediately, or running `/team` (`status`, `on`, `off`, `auto`, `preset ID`, `settings`).
+- Team members and host auto-matching: enable or disable built-in roles, add or remove custom roles, choose `Auto-match host (Recommended)` or lock a specific provider, model, thinking level, session mode, and dynamic provider options from the live host catalog, lock all auto/fallback roles to host defaults, or reset all roles to Auto.
+- Live commander prompt preview: inspect and copy the exact Markdown system prompt (using resolved host models) that will be appended to commanders.
+- Composer, panel, and command controls: keep Paseo's native Subagents pill track untouched while switching team mode per session from the composer selector (`Auto`, `Off`, or a specific preset), opening the Team Status or Workspace Team panel from Command Center or `/team`, checking each role's resolved model or fallback badge, reloading an idle session to apply updated instructions immediately, or running `/team` (`status`, `on`, `off`, `auto`, `preset ID`, `settings`).
 
 ## Data handling and limits
 

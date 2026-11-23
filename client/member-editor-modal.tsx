@@ -15,18 +15,26 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
+  isHighCostModelId,
+  resolveRoleFromCatalog,
+  resolveTeamMember,
+} from "../shared/catalog-defaults.ts";
+import {
   getProviderControlsRpc,
   type ProviderCatalogControl,
   type ProviderCatalogEntry,
   type ProviderCatalogModel,
 } from "../shared/contracts.ts";
+import { TEAM_MANAGER_ICON } from "../shared/icon.ts";
 import {
+  AUTO_PROVIDER,
   TeamMemberSchema,
   type FeatureValue,
   type TeamMember,
 } from "../shared/settings.ts";
 import { messages } from "./messages.ts";
 import {
+  formatMemberSummary,
   generateUniqueId,
   isValidRoleId,
   localizeModeLabel,
@@ -81,7 +89,9 @@ function getSelectableModels(entry: ProviderCatalogEntry | undefined): ProviderC
 
 function pickDefaultModel(entry: ProviderCatalogEntry | undefined): ProviderCatalogModel | undefined {
   const selectable = getSelectableModels(entry);
-  return selectable.find((item) => item.isDefault) ?? selectable[0];
+  const affordable = selectable.filter((item) => !isHighCostModelId(item.id));
+  const pool = affordable.length > 0 ? affordable : selectable;
+  return pool.find((item) => item.isDefault) ?? pool[0];
 }
 
 function pickDefaultMode(entry: ProviderCatalogEntry | undefined): Str {
@@ -105,13 +115,19 @@ function pickDefaultThinking(
   return model?.defaultThinkingOptionId ?? "";
 }
 
-function pickDefaultFeatures(providerId: Str): FeatureMap {
-  return providerId === "codex" ? { service_tier: "default" } : {};
+function pickDefaultFeatures(entry: ProviderCatalogEntry | undefined): FeatureMap {
+  if (!entry) return {};
+  const supportsDefaultServiceTier = entry.controls.some(
+    (control) =>
+      control.type === "select" &&
+      control.key === "service_tier" &&
+      control.choices.some((choice) => choice.value === "default"),
+  );
+  return supportsDefaultServiceTier ? { service_tier: "default" } : {};
 }
 
 function buildInitialDraft(
   initialMember: TeamMember | null,
-  providers: readonly ProviderCatalogEntry[],
 ): MemberDraft {
   if (initialMember) {
     return {
@@ -129,21 +145,16 @@ function buildInitialDraft(
     };
   }
 
-  const readyProvider =
-    providers.find((item) => item.enabled && item.status === "ready") ??
-    providers[0];
-  const providerId = readyProvider?.provider ?? "antigravity";
-  const defaultModel = pickDefaultModel(readyProvider);
   return {
     id: "",
     roleId: "",
     name: "",
     enabled: true,
-    provider: providerId,
-    model: defaultModel?.id ?? "",
-    thinkingOptionId: pickDefaultThinking(providerId, defaultModel),
-    modeId: pickDefaultMode(readyProvider),
-    features: pickDefaultFeatures(providerId),
+    provider: AUTO_PROVIDER,
+    model: "",
+    thinkingOptionId: "",
+    modeId: "",
+    features: {},
     responsibilities: "",
     rolePrompt: "",
   };
@@ -163,7 +174,7 @@ export function MemberEditorModal({
   const fetchProviderControls = useRpc(getProviderControlsRpc);
 
   const [draft, setDraft] = useState<MemberDraft>(() =>
-    buildInitialDraft(initialMember, providers),
+    buildInitialDraft(initialMember),
   );
   const [roleIdTouched, setRoleIdTouched] = useState<Bool>(Boolean(initialMember));
   const [nameError, setNameError] = useState<NullableStr>(null);
@@ -183,7 +194,7 @@ export function MemberEditorModal({
     const justOpened = open && !wasOpenRef.current;
     wasOpenRef.current = open;
     if (!justOpened) return;
-    setDraft(buildInitialDraft(initialMember, providers));
+    setDraft(buildInitialDraft(initialMember));
     setRoleIdTouched(Boolean(initialMember));
     setNameError(null);
     setRoleIdError(null);
@@ -193,11 +204,52 @@ export function MemberEditorModal({
     setControlDefaults({});
     setControlsError(null);
     setSubmitting(false);
-  }, [open, initialMember, providers]);
+  }, [open, initialMember]);
+
+  const isAutoProvider = draft.provider === AUTO_PROVIDER;
+
+  const autoResolvedPreview = useMemo(() => {
+    if (!isAutoProvider) return null;
+    const previewMember: TeamMember = {
+      id: draft.id || "preview",
+      roleId: draft.roleId.trim() || "custom",
+      name: draft.name.trim() || "Role",
+      enabled: draft.enabled,
+      provider: AUTO_PROVIDER,
+      model: "",
+      thinkingOptionId: draft.thinkingOptionId.trim(),
+      modeId: draft.modeId.trim(),
+      features: {},
+      responsibilities: "",
+      rolePrompt: "",
+    };
+    return resolveTeamMember(previewMember, providers);
+  }, [
+    isAutoProvider,
+    draft.id,
+    draft.roleId,
+    draft.name,
+    draft.enabled,
+    draft.thinkingOptionId,
+    draft.modeId,
+    providers,
+  ]);
+
+  const effectiveProviderId = isAutoProvider
+    ? (autoResolvedPreview?.status === "auto-matched"
+        ? autoResolvedPreview.member.provider
+        : "")
+    : draft.provider;
+
+  const effectiveModelId = isAutoProvider
+    ? (autoResolvedPreview?.status === "auto-matched"
+        ? autoResolvedPreview.member.model
+        : "")
+    : draft.model;
 
   const selectedProviderEntry = useMemo(
-    () => providers.find((item) => item.provider === draft.provider),
-    [providers, draft.provider],
+    () => providers.find((item) => item.provider === effectiveProviderId),
+    [providers, effectiveProviderId],
   );
 
   const selectableModels = useMemo(
@@ -206,12 +258,18 @@ export function MemberEditorModal({
   );
 
   const selectedModelEntry = useMemo(
-    () => selectableModels.find((item) => item.id === draft.model),
-    [selectableModels, draft.model],
+    () => selectableModels.find((item) => item.id === effectiveModelId),
+    [selectableModels, effectiveModelId],
   );
 
   useEffect(() => {
-    if (!open || !draft.provider.trim()) return;
+    if (!open || isAutoProvider || !draft.provider.trim()) {
+      setControls([]);
+      setControlDefaults({});
+      setControlsLoading(false);
+      setControlsError(null);
+      return;
+    }
     const reqId = controlsRequestRef.current + 1;
     controlsRequestRef.current = reqId;
     setControlsLoading(true);
@@ -241,6 +299,7 @@ export function MemberEditorModal({
       });
   }, [
     open,
+    isAutoProvider,
     draft.provider,
     draft.model,
     draft.modeId,
@@ -249,18 +308,22 @@ export function MemberEditorModal({
   ]);
 
   const providerOptions = useMemo(() => {
-    const list = providers.map((entry) => ({
-      value: entry.provider,
-      label:
-        entry.enabled && entry.status === "ready"
-          ? entry.label
-          : t("memberModal.providerUnavailable", { label: entry.label }),
-    }));
+    const list = [
+      { value: AUTO_PROVIDER, label: t("memberModal.providerAuto") },
+      ...providers.map((entry) => ({
+        value: entry.provider,
+        label:
+          entry.enabled && entry.status === "ready"
+            ? entry.label
+            : t("memberModal.providerUnavailable", { label: entry.label }),
+      })),
+    ];
     if (
       draft.provider &&
+      draft.provider !== AUTO_PROVIDER &&
       !list.some((item) => item.value === draft.provider)
     ) {
-      list.unshift({
+      list.push({
         value: draft.provider,
         label: t("memberModal.providerUnavailable", { label: draft.provider }),
       });
@@ -329,16 +392,42 @@ export function MemberEditorModal({
     (nextProvider: Str) => {
       setProviderError(null);
       setModelError(null);
+      if (nextProvider === AUTO_PROVIDER) {
+        setDraft((current) => ({
+          ...current,
+          provider: AUTO_PROVIDER,
+          model: "",
+          thinkingOptionId: "",
+          modeId: "",
+          features: {},
+        }));
+        return;
+      }
       const nextEntry = providers.find((item) => item.provider === nextProvider);
-      const nextDefaultModel = pickDefaultModel(nextEntry);
-      setDraft((current) => ({
-        ...current,
-        provider: nextProvider,
-        model: nextDefaultModel?.id ?? "",
-        thinkingOptionId: pickDefaultThinking(nextProvider, nextDefaultModel),
-        modeId: pickDefaultMode(nextEntry),
-        features: pickDefaultFeatures(nextProvider),
-      }));
+      setDraft((current) => {
+        const resolvedForProvider = nextEntry
+          ? resolveRoleFromCatalog(current.roleId.trim() || "custom", [nextEntry])
+          : null;
+        if (resolvedForProvider) {
+          return {
+            ...current,
+            provider: nextProvider,
+            model: resolvedForProvider.model,
+            thinkingOptionId: resolvedForProvider.thinkingOptionId,
+            modeId: resolvedForProvider.modeId,
+            features: { ...resolvedForProvider.features },
+          };
+        }
+        const nextDefaultModel = pickDefaultModel(nextEntry);
+        return {
+          ...current,
+          provider: nextProvider,
+          model: nextDefaultModel?.id ?? "",
+          thinkingOptionId: pickDefaultThinking(nextProvider, nextDefaultModel),
+          modeId: pickDefaultMode(nextEntry),
+          features: pickDefaultFeatures(nextEntry),
+        };
+      });
     },
     [providers],
   );
@@ -419,7 +508,7 @@ export function MemberEditorModal({
       setProviderError(null);
     }
 
-    if (!trimmedModel) {
+    if (trimmedProvider !== AUTO_PROVIDER && !trimmedModel) {
       setModelError(t("memberModal.modelRequired"));
       hasError = true;
     } else {
@@ -435,16 +524,17 @@ export function MemberEditorModal({
         existingMembers.map((item) => item.id),
       );
 
+    const isAuto = trimmedProvider === AUTO_PROVIDER;
     const parsed = TeamMemberSchema.parse({
       id: finalId,
       roleId: trimmedRoleId,
       name: trimmedName,
       enabled: draft.enabled,
       provider: trimmedProvider,
-      model: trimmedModel,
+      model: isAuto ? "" : trimmedModel,
       thinkingOptionId: draft.thinkingOptionId.trim(),
       modeId: draft.modeId.trim(),
-      features: draft.features,
+      features: isAuto ? {} : draft.features,
       responsibilities: draft.responsibilities,
       rolePrompt: draft.rolePrompt,
     });
@@ -500,6 +590,24 @@ export function MemberEditorModal({
           width: "100%",
           minHeight: layout.compact ? 96 : 112,
           textAlignVertical: "top",
+        },
+        autoPreviewBox: {
+          backgroundColor: theme.colors.surface2,
+          borderColor: theme.colors.accent,
+          borderWidth: 1,
+          borderRadius: 8,
+          paddingHorizontal: 11,
+          paddingVertical: 9,
+          gap: 4,
+        },
+        autoPreviewLabel: {
+          color: theme.colors.accent,
+          fontSize: 12,
+          fontWeight: "600",
+        },
+        autoPreviewText: {
+          color: theme.colors.foreground,
+          fontSize: 12.5,
         },
         mutedText: {
           color: theme.colors.foregroundMuted,
@@ -560,7 +668,7 @@ export function MemberEditorModal({
   return (
     <Modal
       title={initialMember ? t("memberModal.editTitle") : t("memberModal.addTitle")}
-      icon={<Icon name="Users" size={18} color={theme.colors.foreground} />}
+      icon={<Icon icon={TEAM_MANAGER_ICON} size={18} color={theme.colors.foreground} />}
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) onClose();
@@ -644,7 +752,25 @@ export function MemberEditorModal({
               </SettingsRow>
             )}
 
-            {modelOptions.length > 0 ? (
+            {isAutoProvider ? (
+              <View style={styles.fieldBlock}>
+                <View style={styles.autoPreviewBox}>
+                  <Text style={styles.autoPreviewLabel}>
+                    {t("memberModal.autoPreviewLabel")}
+                  </Text>
+                  <Text style={styles.autoPreviewText}>
+                    {autoResolvedPreview?.status === "auto-matched"
+                      ? t("memberModal.autoPreviewMatched", {
+                          summary: formatMemberSummary(
+                            autoResolvedPreview.member,
+                            locale,
+                          ),
+                        })
+                      : t("memberModal.autoPreviewUnresolved")}
+                  </Text>
+                </View>
+              </View>
+            ) : modelOptions.length > 0 ? (
               <SettingsSelect<Str>
                 label={t("memberModal.modelLabel")}
                 error={modelError}
@@ -691,7 +817,7 @@ export function MemberEditorModal({
             />
           </SettingsCard>
 
-          {(controlsLoading || controlsError || controls.length > 0) ? (
+          {!isAutoProvider && (controlsLoading || controlsError || controls.length > 0) ? (
             <SettingsCard>
               <SettingsRow label={t("memberModal.controlsTitle")}>
                 {controlsLoading ? (

@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { findSvgIconProblem } from "@getpaseo/plugin";
+import { resolvePresetMembers } from "../../shared/catalog-defaults.ts";
+import type { ProviderCatalogEntry } from "../../shared/contracts.ts";
+import { TEAM_MANAGER_ICON } from "../../shared/icon.ts";
 import {
+  AUTO_PROVIDER,
   DEFAULT_TEAM_SETTINGS,
   METADATA_KEYS,
   TeamMemberSchema,
 } from "../../shared/settings.ts";
 import {
   addExcludedDirectory,
+  applyResolvedFallbackToMember,
   buildComposerMetadataPatch,
   COMPOSER_AUTO_VALUE,
   COMPOSER_OFF_VALUE,
@@ -22,9 +28,11 @@ import {
   localizeModeLabel,
   localizeProviderControl,
   localizeThinkingLabel,
+  lockPresetMembersToHost,
   normalizeExcludedDirectories,
   parseTeamSlashArgs,
   removeExcludedDirectory,
+  setAllPresetMembersAuto,
   toggleMemberEnabled,
   updatePreset,
   updateWorkspaceOverride,
@@ -218,10 +226,8 @@ describe("preset and member draft mutations", () => {
 
     const backendMember = preset.members.find((m) => m.roleId === "backend");
     assert.ok(backendMember);
-    assert.equal(
-      formatMemberSummary(backendMember),
-      "codex/auto/gpt-6.2-sol · xhigh · full-access · service_tier=default",
-    );
+    assert.equal(backendMember.provider, AUTO_PROVIDER);
+    assert.equal(formatMemberSummary(backendMember), AUTO_PROVIDER);
   });
 
   it("sets and clears workspace overrides cleanly", () => {
@@ -318,13 +324,126 @@ describe("dynamic provider label localization", () => {
     );
     assert.equal(untouchedEn.label, "Plan mode");
 
-    const backendMember = DEFAULT_TEAM_SETTINGS.presets[0].members.find(
-      (m) => m.roleId === "backend",
-    );
-    assert.ok(backendMember);
+    const explicitCodexMember = TeamMemberSchema.parse({
+      id: "backend",
+      roleId: "backend",
+      name: "后端开发",
+      provider: "codex",
+      model: "auto/gpt-6.2-sol",
+      thinkingOptionId: "xhigh",
+      modeId: "full-access",
+      features: { service_tier: "default" },
+    });
     assert.equal(
-      formatMemberSummary(backendMember, "zh-CN"),
+      formatMemberSummary(explicitCodexMember, "zh-CN"),
       "codex/auto/gpt-6.2-sol · 极高 · 完全访问 · 速度=普通",
     );
+  });
+});
+
+describe("brand SVG icon and host auto-match helpers", () => {
+  const sampleCatalog: ProviderCatalogEntry[] = [
+    {
+      provider: "codex",
+      label: "Codex",
+      enabled: true,
+      status: "ready",
+      defaultModeId: "auto",
+      modes: [
+        { id: "auto", label: "Default Permissions" },
+        { id: "full-access", label: "Full Access" },
+      ],
+      models: [
+        {
+          id: "auto/gpt-6.2-sol",
+          label: "GPT-6.2 Sol",
+          isDefault: true,
+          thinkingOptions: [
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High" },
+            { id: "xhigh", label: "Extra High" },
+          ],
+        },
+      ],
+      controls: [
+        {
+          type: "select",
+          key: "service_tier",
+          label: "Speed",
+          defaultValue: "default",
+          choices: [
+            { value: "default", label: "Normal" },
+            { value: "priority", label: "Fast" },
+          ],
+        },
+      ],
+    },
+    {
+      provider: "antigravity",
+      label: "Antigravity",
+      enabled: true,
+      status: "ready",
+      defaultModeId: "full-access",
+      modes: [
+        { id: "plan", label: "Plan" },
+        { id: "full-access", label: "Full access" },
+      ],
+      models: [
+        {
+          id: "gemini-4-neon",
+          label: "Gemini 4 Neon",
+          isDefault: true,
+          thinkingOptions: [
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High" },
+          ],
+        },
+      ],
+      controls: [],
+    },
+  ];
+
+  it("validates TEAM_MANAGER_ICON SVG markup with Paseo SDK validator", () => {
+    assert.equal(findSvgIconProblem(TEAM_MANAGER_ICON.svg), null);
+  });
+
+  it("locks auto/fallback members to host defaults, applies single fallback, and resets all to auto", () => {
+    const defaultPreset = DEFAULT_TEAM_SETTINGS.presets[0];
+    const { preset: locked, lockedCount } = lockPresetMembersToHost(
+      defaultPreset,
+      sampleCatalog,
+    );
+    assert.equal(lockedCount, defaultPreset.members.length);
+    const lockedBackend = locked.members.find((m) => m.roleId === "backend");
+    const lockedFrontend = locked.members.find((m) => m.roleId === "frontend");
+    assert.equal(lockedBackend?.provider, "codex");
+    assert.equal(lockedBackend?.model, "auto/gpt-6.2-sol");
+    assert.equal(lockedBackend?.thinkingOptionId, "xhigh");
+    assert.deepEqual(lockedBackend?.features, { service_tier: "default" });
+    assert.equal(lockedFrontend?.provider, "antigravity");
+    assert.equal(lockedFrontend?.model, "gemini-4-neon");
+
+    const withUnavailable = upsertMember(locked, {
+      ...lockedBackend!,
+      provider: "missing-provider",
+      model: "missing-model",
+    });
+    const { resolved } = resolvePresetMembers(withUnavailable, sampleCatalog);
+    const fallbackItem = resolved.find((r) => r.configured.roleId === "backend");
+    assert.equal(fallbackItem?.status, "fallback-host");
+    const applied = applyResolvedFallbackToMember(withUnavailable, fallbackItem!);
+    assert.equal(
+      applied.members.find((m) => m.roleId === "backend")?.provider,
+      "codex",
+    );
+
+    const allAuto = setAllPresetMembersAuto(locked);
+    for (const member of allAuto.members) {
+      assert.equal(member.provider, AUTO_PROVIDER);
+      assert.equal(member.model, "");
+      assert.equal(member.thinkingOptionId, "");
+      assert.equal(member.modeId, "");
+      assert.deepEqual(member.features, {});
+    }
   });
 });

@@ -23,6 +23,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
+  resolvePresetMembers,
+  type ResolvedTeamMember,
+} from "../shared/catalog-defaults.ts";
+import {
   getProviderCatalogRpc,
   previewCommanderPromptRpc,
   type ProviderCatalogEntry,
@@ -30,6 +34,8 @@ import {
 } from "../shared/contracts.ts";
 import { buildCommanderPrompt } from "../shared/prompt-builder.ts";
 import {
+  AUTO_PROVIDER,
+  formatProviderModel,
   teamSettings,
   type TeamMember,
   type TeamPreset,
@@ -40,14 +46,17 @@ import { messages } from "./messages.ts";
 import { syncSettingsSnapshot } from "./settings-store.ts";
 import {
   addExcludedDirectory,
+  applyResolvedFallbackToMember,
   createNewPreset,
   deleteMember,
   deletePreset,
   duplicatePreset,
   formatMemberSummary,
   hasExcludedDirectory,
+  lockPresetMembersToHost,
   normalizeExcludedDirectories,
   removeExcludedDirectory,
+  setAllPresetMembersAuto,
   toggleMemberEnabled,
   updatePreset,
   upsertMember,
@@ -402,9 +411,59 @@ function ReadyTeamSettingsContent({
     void loadCatalog(false);
   }, [loadCatalog]);
 
-  const localFallbackPreview = useMemo(
-    () => (activePreset ? buildCommanderPrompt({ preset: activePreset }) : ""),
+  const resolvedPresetResult = useMemo(
+    () =>
+      activePreset
+        ? resolvePresetMembers(activePreset, catalog?.providers ?? EMPTY_PROVIDERS)
+        : null,
+    [activePreset, catalog?.providers],
+  );
+
+  const resolvedByMemberId = useMemo(() => {
+    const map = new Map<Str, ResolvedTeamMember>();
+    if (resolvedPresetResult) {
+      for (const item of resolvedPresetResult.resolved) {
+        map.set(item.configured.id, item);
+      }
+    }
+    return map;
+  }, [resolvedPresetResult]);
+
+  const hasLockableMembers = useMemo(
+    () =>
+      Boolean(
+        resolvedPresetResult?.resolved.some(
+          (item) =>
+            item.status === "auto-matched" || item.status === "fallback-host",
+        ),
+      ),
+    [resolvedPresetResult],
+  );
+
+  const hasNonAutoMembers = useMemo(
+    () =>
+      Boolean(
+        activePreset?.members.some(
+          (member) =>
+            member.provider !== AUTO_PROVIDER ||
+            member.model !== "" ||
+            member.thinkingOptionId !== "" ||
+            member.modeId !== "" ||
+            Object.keys(member.features).length > 0,
+        ),
+      ),
     [activePreset],
+  );
+
+  const localFallbackPreview = useMemo(
+    () =>
+      activePreset
+        ? buildCommanderPrompt({
+            preset: activePreset,
+            resolvedMembers: resolvedPresetResult?.resolved,
+          })
+        : "",
+    [activePreset, resolvedPresetResult],
   );
 
   useEffect(() => {
@@ -623,6 +682,64 @@ function ReadyTeamSettingsContent({
     [activePreset, commitImmediate, toast, t],
   );
 
+  const handleApplyFallback = useCallback(
+    async (resolved: ResolvedTeamMember) => {
+      if (!activePreset) return;
+      const ok = await commitImmediate((current) => ({
+        ...current,
+        presets: current.presets.map((preset) =>
+          preset.id === activePreset.id
+            ? applyResolvedFallbackToMember(preset, resolved)
+            : preset,
+        ),
+      }));
+      if (ok) {
+        toast.show(
+          t("settings.members.appliedFallbackToast", {
+            name: resolved.configured.name,
+          }),
+          { variant: "success" },
+        );
+      }
+    },
+    [activePreset, commitImmediate, toast, t],
+  );
+
+  const handleLockHostDefaults = useCallback(async () => {
+    if (!activePreset || !catalog) return;
+    const { preset: lockedPreset, lockedCount } = lockPresetMembersToHost(
+      activePreset,
+      catalog.providers,
+    );
+    if (lockedCount === 0) return;
+    const ok = await commitImmediate((current) => ({
+      ...current,
+      presets: current.presets.map((preset) =>
+        preset.id === activePreset.id ? lockedPreset : preset,
+      ),
+    }));
+    if (ok) {
+      toast.show(t("settings.members.lockedHostToast", { count: lockedCount }), {
+        variant: "success",
+      });
+    }
+  }, [activePreset, catalog, commitImmediate, toast, t]);
+
+  const handleSetAllAuto = useCallback(async () => {
+    if (!activePreset) return;
+    const ok = await commitImmediate((current) => ({
+      ...current,
+      presets: current.presets.map((preset) =>
+        preset.id === activePreset.id
+          ? setAllPresetMembersAuto(preset)
+          : preset,
+      ),
+    }));
+    if (ok) {
+      toast.show(t("settings.members.setAllAutoToast"), { variant: "success" });
+    }
+  }, [activePreset, commitImmediate, toast, t]);
+
   const handleCopyPreview = useCallback(async () => {
     const content = previewText ?? localFallbackPreview;
     if (!content) return;
@@ -813,6 +930,22 @@ function ReadyTeamSettingsContent({
         },
         successBadgeText: {
           color: theme.colors.statusSuccess,
+          fontSize: 11.5,
+          fontWeight: "600",
+        },
+        accentBadge: {
+          backgroundColor: theme.colors.surface2,
+          borderColor: theme.colors.accent,
+          borderWidth: 1,
+          borderRadius: 999,
+          paddingHorizontal: 10,
+          paddingVertical: 4,
+          alignSelf: "center",
+          alignItems: "center",
+          justifyContent: "center",
+        },
+        accentBadgeText: {
+          color: theme.colors.accent,
           fontSize: 11.5,
           fontWeight: "600",
         },
@@ -1284,97 +1417,166 @@ function ReadyTeamSettingsContent({
             {!activePreset || activePreset.members.length === 0 ? (
               <Text style={styles.mutedText}>{t("settings.members.empty")}</Text>
             ) : (
-              activePreset.members.map((member) => (
-                <View key={member.id} style={styles.memberCard}>
-                  <View style={styles.memberHeader}>
-                    <View style={styles.memberTitleRow}>
-                      <Text style={styles.memberName}>{member.name}</Text>
-                      <Text style={styles.memberRoleTag}>{member.roleId}</Text>
-                      <View
-                        style={
-                          member.enabled
-                            ? styles.successBadge
-                            : styles.mutedBadge
-                        }
-                      >
-                        <Text
+              activePreset.members.map((member) => {
+                const resolved = resolvedByMemberId.get(member.id);
+                const isAuto = member.provider === AUTO_PROVIDER;
+                return (
+                  <View key={member.id} style={styles.memberCard}>
+                    <View style={styles.memberHeader}>
+                      <View style={styles.memberTitleRow}>
+                        <Text style={styles.memberName}>{member.name}</Text>
+                        <Text style={styles.memberRoleTag}>{member.roleId}</Text>
+                        <View
                           style={
                             member.enabled
-                              ? styles.successBadgeText
-                              : styles.mutedBadgeText
+                              ? styles.successBadge
+                              : styles.mutedBadge
                           }
                         >
-                          {member.enabled
-                            ? t("settings.members.enabledBadge")
-                            : t("settings.members.optionalBadge")}
-                        </Text>
+                          <Text
+                            style={
+                              member.enabled
+                                ? styles.successBadgeText
+                                : styles.mutedBadgeText
+                            }
+                          >
+                            {member.enabled
+                              ? t("settings.members.enabledBadge")
+                              : t("settings.members.optionalBadge")}
+                          </Text>
+                        </View>
+                        {isAuto ? (
+                          <View style={styles.accentBadge}>
+                            <Text style={styles.accentBadgeText}>
+                              {t("settings.members.autoBadge")}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      <View style={styles.memberActions}>
+                        {resolved?.status === "fallback-host" ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            onPress={() => void handleApplyFallback(resolved)}
+                            style={[styles.chipBtn, styles.chipBtnPrimary]}
+                          >
+                            <Icon
+                              name="Check"
+                              size={13}
+                              color={theme.colors.accentForeground}
+                            />
+                            <Text style={styles.chipBtnTextPrimary}>
+                              {t("settings.members.applyFallbackAction")}
+                            </Text>
+                          </Pressable>
+                        ) : null}
+
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={t("settings.members.toggleA11y", {
+                            name: member.name,
+                          })}
+                          onPress={() =>
+                            void handleToggleMember(member.id, !member.enabled)
+                          }
+                          style={styles.chipBtn}
+                        >
+                          <Text style={styles.chipBtnText}>
+                            {member.enabled
+                              ? t("settings.members.disableAction")
+                              : t("settings.members.enableAction")}
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => {
+                            setEditingMember(member);
+                            setMemberModalOpen(true);
+                          }}
+                          style={styles.chipBtn}
+                        >
+                          <Icon
+                            name="Pencil"
+                            size={13}
+                            color={theme.colors.foreground}
+                          />
+                          <Text style={styles.chipBtnText}>
+                            {t("settings.members.editAction")}
+                          </Text>
+                        </Pressable>
+
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => void handleDeleteMember(member)}
+                          style={[styles.chipBtn, styles.chipBtnDanger]}
+                        >
+                          <Icon
+                            name="Trash2"
+                            size={13}
+                            color={theme.colors.statusDanger}
+                          />
+                          <Text style={styles.chipBtnTextDanger}>
+                            {t("settings.members.deleteAction")}
+                          </Text>
+                        </Pressable>
                       </View>
                     </View>
 
-                    <View style={styles.memberActions}>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={t("settings.members.toggleA11y", {
-                          name: member.name,
-                        })}
-                        onPress={() =>
-                          void handleToggleMember(member.id, !member.enabled)
-                        }
-                        style={styles.chipBtn}
-                      >
-                        <Text style={styles.chipBtnText}>
-                          {member.enabled
-                            ? t("settings.members.disableAction")
-                            : t("settings.members.enableAction")}
+                    {isAuto ? (
+                      resolved?.status === "auto-matched" ? (
+                        <Text style={styles.memberSummary}>
+                          {t("settings.members.autoMatchedSummary", {
+                            summary: formatMemberSummary(
+                              resolved.member,
+                              locale,
+                            ),
+                          })}
                         </Text>
-                      </Pressable>
+                      ) : (
+                        <Text style={styles.mutedText}>
+                          {catalogLoading
+                            ? t("settings.members.autoResolving")
+                            : t("settings.members.autoUnresolved")}
+                        </Text>
+                      )
+                    ) : (
+                      <>
+                        <Text style={styles.memberSummary}>
+                          {formatMemberSummary(member, locale)}
+                        </Text>
+                        {resolved?.status === "fallback-host" ? (
+                          <Text style={styles.warningText}>
+                            {t("settings.members.fallbackHostWarning", {
+                              configured: formatProviderModel(
+                                member.provider,
+                                member.model,
+                              ),
+                              fallback: formatMemberSummary(
+                                resolved.member,
+                                locale,
+                              ),
+                            })}
+                          </Text>
+                        ) : resolved?.status === "unresolved" &&
+                          !catalogLoading &&
+                          (catalog?.providers.length ?? 0) > 0 ? (
+                          <Text style={styles.warningText}>
+                            {t("settings.members.unresolvedWarning")}
+                          </Text>
+                        ) : null}
+                      </>
+                    )}
 
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => {
-                          setEditingMember(member);
-                          setMemberModalOpen(true);
-                        }}
-                        style={styles.chipBtn}
-                      >
-                        <Icon
-                          name="Pencil"
-                          size={13}
-                          color={theme.colors.foreground}
-                        />
-                        <Text style={styles.chipBtnText}>
-                          {t("settings.members.editAction")}
-                        </Text>
-                      </Pressable>
-
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={() => void handleDeleteMember(member)}
-                        style={[styles.chipBtn, styles.chipBtnDanger]}
-                      >
-                        <Icon
-                          name="Trash2"
-                          size={13}
-                          color={theme.colors.statusDanger}
-                        />
-                        <Text style={styles.chipBtnTextDanger}>
-                          {t("settings.members.deleteAction")}
-                        </Text>
-                      </Pressable>
-                    </View>
+                    {member.responsibilities.trim() ? (
+                      <Text style={styles.mutedText}>
+                        {member.responsibilities.trim()}
+                      </Text>
+                    ) : null}
                   </View>
-
-                  <Text style={styles.memberSummary}>
-                    {formatMemberSummary(member, locale)}
-                  </Text>
-
-                  {member.responsibilities.trim() ? (
-                    <Text style={styles.mutedText}>
-                      {member.responsibilities.trim()}
-                    </Text>
-                  ) : null}
-                </View>
-              ))
+                );
+              })
             )}
 
             <View style={styles.actionRow}>
@@ -1393,6 +1595,42 @@ function ReadyTeamSettingsContent({
                 />
                 <Text style={styles.chipBtnTextPrimary}>
                   {t("settings.members.addRoleAction")}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="button"
+                disabled={catalogLoading || !hasLockableMembers}
+                onPress={() => void handleLockHostDefaults()}
+                style={[
+                  styles.chipBtn,
+                  catalogLoading || !hasLockableMembers
+                    ? styles.chipBtnDisabled
+                    : null,
+                ]}
+              >
+                <Icon name="Check" size={13} color={theme.colors.foreground} />
+                <Text style={styles.chipBtnText}>
+                  {t("settings.members.lockHostAction")}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="button"
+                disabled={!hasNonAutoMembers}
+                onPress={() => void handleSetAllAuto()}
+                style={[
+                  styles.chipBtn,
+                  !hasNonAutoMembers ? styles.chipBtnDisabled : null,
+                ]}
+              >
+                <Icon
+                  name="Sparkles"
+                  size={13}
+                  color={theme.colors.foreground}
+                />
+                <Text style={styles.chipBtnText}>
+                  {t("settings.members.setAllAutoAction")}
                 </Text>
               </Pressable>
             </View>

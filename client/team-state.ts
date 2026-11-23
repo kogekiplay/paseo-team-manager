@@ -1,10 +1,19 @@
-import type { ProviderCatalogControl } from "../shared/contracts.ts";
+import {
+  resolvePresetMembers,
+  type ResolvedTeamMember,
+} from "../shared/catalog-defaults.ts";
+import type {
+  ProviderCatalogControl,
+  ProviderCatalogEntry,
+} from "../shared/contracts.ts";
 import { normalizeDirectoryPath } from "../shared/policy.ts";
 import {
+  AUTO_PROVIDER,
   formatProviderModel,
   METADATA_KEYS,
   TeamMemberSchema,
   TeamPresetSchema,
+  type FeatureValue,
   type TeamMember,
   type TeamPreset,
   type TeamSettingsValues,
@@ -477,7 +486,18 @@ function formatLocalizedFeatureEntry(
   return `${key}=${String(value)}`;
 }
 
-export function formatMemberSummary(member: TeamMember, locale?: Str): Str {
+export interface MemberConfigSummaryInput {
+  readonly provider: Str;
+  readonly model: Str;
+  readonly thinkingOptionId: Str;
+  readonly modeId: Str;
+  readonly features: Readonly<Record<Str, FeatureValue>>;
+}
+
+export function formatMemberConfigSummary(
+  member: MemberConfigSummaryInput,
+  locale?: Str,
+): Str {
   const parts: Str[] = [formatProviderModel(member.provider, member.model)];
   if (member.thinkingOptionId.trim()) {
     const thinking = member.thinkingOptionId.trim();
@@ -494,6 +514,63 @@ export function formatMemberSummary(member: TeamMember, locale?: Str): Str {
     parts.push(formatLocalizedFeatureEntry(key, value, locale));
   }
   return parts.join(" · ");
+}
+
+export function formatMemberSummary(member: TeamMember, locale?: Str): Str {
+  return formatMemberConfigSummary(member, locale);
+}
+
+export function lockPresetMembersToHost(
+  preset: TeamPreset,
+  providers: readonly ProviderCatalogEntry[],
+): { readonly preset: TeamPreset; readonly lockedCount: number } {
+  const { resolved } = resolvePresetMembers(preset, providers);
+  let lockedCount = 0;
+  const members = resolved.map((item) => {
+    if (item.status === "auto-matched" || item.status === "fallback-host") {
+      lockedCount += 1;
+      return {
+        ...item.member,
+        features: { ...item.member.features },
+      };
+    }
+    return item.configured;
+  });
+  return {
+    preset: { ...preset, members },
+    lockedCount,
+  };
+}
+
+export function setAllPresetMembersAuto(preset: TeamPreset): TeamPreset {
+  return {
+    ...preset,
+    members: preset.members.map((member) => ({
+      ...member,
+      provider: AUTO_PROVIDER,
+      model: "",
+      thinkingOptionId: "",
+      modeId: "",
+      features: {},
+    })),
+  };
+}
+
+export function applyResolvedFallbackToMember(
+  preset: TeamPreset,
+  resolved: ResolvedTeamMember,
+): TeamPreset {
+  return {
+    ...preset,
+    members: preset.members.map((member) =>
+      member.id === resolved.configured.id
+        ? {
+            ...resolved.member,
+            features: { ...resolved.member.features },
+          }
+        : member,
+    ),
+  };
 }
 
 export function updateWorkspaceOverride(

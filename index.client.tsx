@@ -23,6 +23,7 @@ import {
   updateWorkspaceOverride,
   type ComposerTeamValue,
 } from "./client/team-state.ts";
+import { TEAM_MANAGER_ICON } from "./shared/icon.ts";
 import { resolveEffectiveTeamConfig } from "./shared/policy.ts";
 import { METADATA_KEYS, SETTINGS_ID } from "./shared/settings.ts";
 
@@ -32,7 +33,7 @@ function TeamSidebarItem({
 }: PluginSidebarItemProps) {
   return (
     <SidebarRow
-      icon="Users"
+      icon={TEAM_MANAGER_ICON}
       active={currentScreen?.screenId === SETTINGS_ID}
       onPress={() => openScreen({ screenId: SETTINGS_ID })}
     />
@@ -79,21 +80,21 @@ export default function contribute(client: PluginClientContext) {
   const removeSettingsScreen = client.addSettingsScreen({
     id: SETTINGS_ID,
     title: messages.message("settings.title"),
-    icon: "Users",
+    icon: TEAM_MANAGER_ICON,
     Component: TeamSettingsScreen,
   });
 
   const removeAgentPanel = client.addAgentPanel({
     id: "team-status",
     title: messages.message("panel.title"),
-    icon: "Users",
+    icon: TEAM_MANAGER_ICON,
     Component: TeamAgentPanel,
   });
 
   const removeWorkspacePanel = client.addWorkspacePanel({
     id: "team-workspace",
     title: messages.message("panel.workspaceTitle"),
-    icon: "Users",
+    icon: TEAM_MANAGER_ICON,
     Component: TeamWorkspacePanel,
   });
 
@@ -111,7 +112,7 @@ export default function contribute(client: PluginClientContext) {
   const removeOpenPanelCommand = client.addCommandCenterItem({
     id: "open-team-workspace-panel",
     title: messages.message("commands.openWorkspacePanelTitle"),
-    icon: "Users",
+    icon: TEAM_MANAGER_ICON,
     keywords: ["team", "roster", "subagent", "status", "团队", "名册", "状态"],
     context: "workspace",
     onSelect({ openPanel }) {
@@ -122,7 +123,7 @@ export default function contribute(client: PluginClientContext) {
   const removeToggleSessionCommand = client.addCommandCenterItem({
     id: "toggle-session-team-mode",
     title: messages.message("commands.toggleSessionTitle"),
-    icon: "Users",
+    icon: TEAM_MANAGER_ICON,
     keywords: ["team", "toggle", "commander", "session", "团队", "切换", "指挥"],
     context: "agent",
     async onSelect({ paseo, workspace, agent }) {

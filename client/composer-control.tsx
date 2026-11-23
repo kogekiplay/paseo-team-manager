@@ -1,6 +1,7 @@
 import { useComposer, useTranslation } from "@getpaseo/plugin/client";
 import { Select } from "@getpaseo/plugin/client/ui";
 import { useCallback, useMemo } from "react";
+import { TEAM_MANAGER_ICON } from "../shared/icon.ts";
 import { messages } from "./messages.ts";
 import { useTeamSettingsStore } from "./settings-store.ts";
 import {
@@ -74,7 +75,7 @@ export function ComposerTeamControl() {
   return (
     <Select<ComposerTeamValue>
       title={t("composer.title")}
-      icon="Users"
+      icon={TEAM_MANAGER_ICON}
       value={currentValue}
       options={options}
       disabled={saving}
