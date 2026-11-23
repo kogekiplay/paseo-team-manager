@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { PaseoApi } from "@getpaseo/client";
 import { createProviderCatalogCache } from "../provider-catalog-cache.ts";
+import type { HostPaseoApi } from "../paseo-types.ts";
+
+type PaseoApi = HostPaseoApi;
 
 function paseoFixture() {
   let snapshots = 0;

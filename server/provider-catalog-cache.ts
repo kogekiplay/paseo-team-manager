@@ -1,6 +1,8 @@
-import type { PaseoApi } from "@getpaseo/client";
 import type { ProviderCatalogEntry } from "../shared/contracts.ts";
 import { fetchProviderCatalogSnapshot } from "./rpc.ts";
+import type { HostPaseoApi } from "./paseo-types.ts";
+
+type PaseoApi = HostPaseoApi;
 
 export interface ProviderCatalogCache {
   getCachedProviders(): readonly ProviderCatalogEntry[];

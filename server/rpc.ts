@@ -1,4 +1,3 @@
-import type { PaseoApi, PaseoProviderSnapshotResult } from "@getpaseo/client";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   getProviderCatalogRpc, getProviderControlsRpc, getWorkspaceTeamStateRpc, previewCommanderPromptRpc,
@@ -13,6 +12,10 @@ import { buildCommanderPrompt, buildSubagentRolePrompt } from "../shared/prompt-
 import { FeatureValueSchema, formatProviderModel, METADATA_KEYS, type TeamSettingsValues } from "../shared/settings.ts";
 import type { createSettingsCache } from "./settings-cache.ts";
 import { listWorkspaceAgents, toWorkspaceTeamAgent } from "./tools.ts";
+import type { HostPaseoApi, HostProviderControlsInput, HostProviderSnapshotResult } from "./paseo-types.ts";
+
+type PaseoApi = HostPaseoApi;
+type PaseoProviderSnapshotResult = HostProviderSnapshotResult;
 
 const providerDefaultValueSchema = FeatureValueSchema.nullable();
 
@@ -58,7 +61,8 @@ export async function handleProviderControls(
       model = getDefaultModel(snapshot.entries.find((entry) => entry.provider === provider)?.models)?.id;
       if (!model) return { provider, controls: [], defaults: {}, error: `No model is available for ${provider}.` };
     }
-    const result = await paseo.providers.listControls({ provider: formatProviderModel(provider, model), modeId, cwd: cwd || homeDir });
+    const controlsInput: HostProviderControlsInput = { provider: formatProviderModel(provider, model), modeId, cwd: cwd || homeDir };
+    const result = await paseo.providers.listControls(controlsInput);
     const controls = ProviderCatalogControlSchema.array().parse(result.controls ?? []);
     const controlDefaults = controls.flatMap(({ key, defaultValue }) => defaultValue === undefined ? [] : [[key, defaultValue] as const]);
     const effectiveDefaults = Object.entries(result.options ?? {}).flatMap(([key, value]) => {

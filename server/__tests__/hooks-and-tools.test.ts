@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
 import type { PluginHookRequests } from "@getpaseo/plugin/server";
 import type { ProviderCatalogEntry } from "../../shared/contracts.ts";
 import {
@@ -8,6 +7,10 @@ import {
 } from "../../shared/settings.ts";
 import { applyAgentCreateBefore, applyAgentOpenBefore } from "../hooks.ts";
 import { createRosterTool } from "../tools.ts";
+import type { HostAgent, HostPaseoApi } from "../paseo-types.ts";
+
+type PaseoAgent = HostAgent;
+type PaseoApi = HostPaseoApi;
 
 const homeDir = "/Users/tester";
 const cwd = `${homeDir}/src/example`;

@@ -1,4 +1,3 @@
-import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
 import { defineAgentTool } from "@getpaseo/plugin/server";
 import { z } from "zod";
 import type { WorkspaceTeamAgent } from "../shared/contracts.ts";
@@ -7,6 +6,10 @@ import { resolvePresetMembers, summarizeResolvedMember } from "../shared/catalog
 import { isSubagentLabels, normalizeDirectoryPath, resolveEffectiveTeamConfig, resolveSubagentRoleId } from "../shared/policy.ts";
 import { buildMemberCreateAgentParams } from "../shared/prompt-builder.ts";
 import { LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL, type TeamSettingsValues } from "../shared/settings.ts";
+import type { HostAgent, HostPaseoApi } from "./paseo-types.ts";
+
+type PaseoAgent = HostAgent;
+type PaseoApi = HostPaseoApi;
 
 export async function listWorkspaceAgents(
   paseo: PaseoApi,

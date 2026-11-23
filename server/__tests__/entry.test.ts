@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
 import { test } from "node:test";
-import type { PaseoAgent, PaseoApi, PaseoProviderControlsInput, PaseoProviderSnapshotResult } from "@getpaseo/client";
 import type { PluginServerContext, PluginSettingsState } from "@getpaseo/plugin/server";
 import contribute from "../../index.server.ts";
 import { getProviderCatalogRpc, getProviderControlsRpc, getWorkspaceTeamStateRpc, previewCommanderPromptRpc } from "../../shared/contracts.ts";
 import { LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL, parseTeamSettings, teamSettings } from "../../shared/settings.ts";
 import { createSettingsCache } from "../settings-cache.ts";
+import type { HostAgent, HostPaseoApi, HostProviderControlsInput, HostProviderSnapshotResult } from "../paseo-types.ts";
+
+type PaseoAgent = HostAgent;
+type PaseoApi = HostPaseoApi;
+type PaseoProviderControlsInput = HostProviderControlsInput;
+type PaseoProviderSnapshotResult = HostProviderSnapshotResult;
 
 type SettingsState = PluginSettingsState<typeof teamSettings.schema>;
 type Handler = (input: unknown, context: { paseo: PaseoApi }) => unknown;
