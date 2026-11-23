@@ -32,6 +32,8 @@ test("the commander gets copyable native tool parameters for enabled members", (
   for (const text of ["create_agent", "send_agent_prompt", "team_get_roster", "Subagents", "worktree", "避免循环轮询"]) {
     assert.ok(prompt.includes(text));
   }
+  assert.match(prompt, /provider\/model/);
+  assert.match(prompt, /禁止擅自升级或切换为 `astra`、`fable` 等高成本模型/);
 });
 
 test("commander can make small changes when configured and receives trimmed extra instructions", () => {

@@ -40,7 +40,7 @@
 
 ## 3. 本机实测 Provider 与模型目录（2026-11-23）
 
-### 3.1 Codex（4 个 Magpie 路由组模型）
+### 3.1 Codex（3 个 Magpie 路由组模型）
 
 - 可用 Modes：`auto`（Default Permissions）、`auto-review`（Auto-review）、`full-access`（Full Access）
 - 可用 Features：
@@ -48,7 +48,6 @@
   - `plan_mode`（boolean）
 - 可用 Models（均支持 `low` / `medium` / `high` / `xhigh` / `max`，除 Luna 外支持 `ultra`）：
   - `auto/gpt-6.2-sol`（默认，GPT-6.2 Sol · routing group）
-  - `auto/gpt-6.2-astra`（GPT-6.2 Astra · routing group）
   - `auto/gpt-6.1-terra`（GPT-6.1 Terra · routing group）
   - `auto/gpt-6-luna`（GPT-6 Luna · routing group）
 
@@ -98,7 +97,7 @@
 
 | 角色 ID | 名称 | 默认启用 | 推荐 Provider / Model | Thinking | Mode | Features | 定位 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `reviewer` | 代码审查官 | 否（按需开启） | `codex/auto/gpt-6.2-astra` | `xhigh` | `auto` | `{ "service_tier": "default" }` | 深度 Code Review、架构风险/边界条件/安全审计，只审查提意见不改代码 |
+| `reviewer` | 代码审查官 | 否（按需开启） | `codex/auto/gpt-6.2-sol` | `xhigh` | `auto` | `{ "service_tier": "default" }` | 深度 Code Review、架构风险/边界条件/安全审计，只审查提意见不改代码 |
 | `qa` | 测试与验收 | 否（按需开启） | `codex/auto/gpt-6.2-sol` | `xhigh` | `full-access` | `{ "service_tier": "default" }` | 编写单元/集成/E2E 测试、复现 Bug、跑回归验证 |
 | `explorer` | 代码库侦察员 | 否（按需开启） | `antigravity/gemini-4-hydrogen` | `medium` | `plan` | `{}` | 极速代码库检索、依赖梳理、日志定位、文档整理，节省主指挥上下文 |
 
@@ -109,7 +108,7 @@
 ### 5.1 共享契约（`shared/`）
 
 - `shared/settings.ts`：
-  - 使用 `defineSettings`（`scope: "host"`, `version: 1`）+ Zod schema 定义持久化配置：
+  - 使用 `defineSettings`（`scope: "host"`, `version: 2`）+ Zod schema 定义持久化配置，并将旧版本中的高成本模型配置迁移到 `auto/gpt-6.2-sol`：
     - `enabled`: 全局是否启用团队指挥模式（默认 `true`）
     - `autoApplyToNewTopLevelAgents`: 是否对新开的顶层会话自动注入（默认 `true`）
     - `excludedDirectories`: 排除目录列表（如 `~/Downloads` 默认可配置跳过，避免闲聊目录也被当成开发项目，默认可留空或提供快捷排除提示，按设置开关决定）
@@ -143,12 +142,12 @@
 
 - `server.registerSettings(teamSettings)` 订阅并缓存最新配置。
 - `server.addHook("agent.create.before", ...)`:
-  - 若新创建的子智能体携带 `paseo-team-manager.role` metadata/label 或匹配预设角色，补齐/规范化关键默认参数（如 Codex `service_tier`、`modeId`、`thinkingOptionId`）而不破坏显式覆盖（策略可配置）。
+  - 仅当全局团队开关和当前目录或工作区均处于启用范围，且新创建会话显式携带 `paseo-team-manager.role` metadata 时，补齐/规范化关键默认参数（如 Codex `service_tier`、`modeId`、`thinkingOptionId`），不从标题推断角色，也不破坏显式覆盖。
 - `server.addHook("agent.open.before", ...)`:
   - 跳过 `purpose === "history"` 与 `background === true`。
   - 判断是否为子智能体：`Boolean(request.labels["paseo.parent-agent-id"])`。
     - **若是子智能体**：读取 `request.labels["paseo-team-manager.role"]` 或 `request.metadata["paseo-team-manager.role"]`，若匹配到角色则追加角色专属 `appendSystemPrompt`。
-    - **若是顶层指挥**：按优先级计算生效状态（会话 `metadata["paseo-team-manager.enabled"]` > 工作区/目录覆盖 > 排除目录规则 > 全局 `enabled && autoApplyToNewTopLevelAgents`）。
+    - **若是顶层指挥**：全局 `enabled: false` 是硬总闸。全局开启时再按优先级计算生效状态（会话 `metadata["paseo-team-manager.enabled"]` > 工作区/目录覆盖 > 排除目录规则 > 全局 `autoApplyToNewTopLevelAgents`）。
       - 若生效：追加指挥团队编排 `appendSystemPrompt`，并挂载只读 Agent Tool：
         - `team_get_roster`：返回当前生效预设、所有启用/可选成员的精确 `create_agent` 参数、以及当前工作区已存在的团队子智能体列表（ID、标题、角色、状态）。
 - 注册 RPC handlers（`getProviderCatalogRpc`、`getWorkspaceTeamStateRpc`、`previewCommanderPromptRpc`）。

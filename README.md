@@ -20,11 +20,13 @@ The default full-stack preset includes two active members and three optional mem
 | --- | --- | --- | --- |
 | Backend | `codex/auto/gpt-6.2-sol` | `xhigh` | `full-access` |
 | Frontend | `antigravity/gemini-4-neon` | `high` | `full-access` |
-| Reviewer | `codex/auto/gpt-6.2-astra` | `xhigh` | `auto` |
+| Reviewer | `codex/auto/gpt-6.2-sol` | `xhigh` | `auto` |
 | QA | `codex/auto/gpt-6.2-sol` | `xhigh` | `full-access` |
 | Explorer | `antigravity/gemini-4-hydrogen` | `medium` | `plan` |
 
 Codex members use the default `service_tier` provider option. Optional roles start disabled and can be enabled in the team settings.
+
+The global team switch is a hard gate. When it is disabled, session metadata and workspace overrides cannot enable team behavior. Creation defaults apply only when team mode is enabled for the current directory or workspace and the new agent explicitly carries the team role metadata.
 
 ## Installation
 

@@ -124,7 +124,10 @@ test("entry registers both hooks and all RPCs, uses a racing settings update and
   };
   const openResult = await fixture.hooks.get("agent.open.before")!({ request: open }, { paseo }) as { appendSystemPrompt: string[] };
   assert.match(openResult.appendSystemPrompt[0], /验证最新配置/);
-  const createResult = await fixture.hooks.get("agent.create.before")!({ request: { config: { provider: "codex", cwd, title: "[backend] task" } } }, { paseo });
+  const createResult = await fixture.hooks.get("agent.create.before")!({ request: {
+    config: { provider: "codex", cwd, title: "[backend] task" },
+    metadata: { [METADATA_KEYS.roleId]: "backend" },
+  } }, { paseo });
   assert.equal((createResult as { metadata: Record<string, unknown> }).metadata[METADATA_KEYS.presetId], "latest");
 
   const catalog = getProviderCatalogRpc.output.parse(await call(getProviderCatalogRpc.name, { cwd, refresh: true }));

@@ -20,7 +20,11 @@ const openRequest: PluginHookRequests["agent.open.before"] = {
 const parentLabel = { [PARENT_AGENT_ID_LABEL]: openRequest.agentId };
 
 test("create fills missing defaults and role metadata without changing cwd or the request", () => {
-  const request = { config: { provider: "codex", cwd, title: "[BACKEND] 新建接口" }, env: { EXISTING: "value" } };
+  const request = {
+    config: { provider: "codex", cwd, title: "[BACKEND] 新建接口" },
+    metadata: { [METADATA_KEYS.roleId]: "BACKEND" },
+    env: { EXISTING: "value" },
+  };
   const result = applyAgentCreateBefore(request, settings, homeDir);
   assert.deepEqual(result, {
     ...request,
@@ -28,14 +32,14 @@ test("create fills missing defaults and role metadata without changing cwd or th
       ...request.config, model: "auto/gpt-6.2-sol", modeId: "full-access", thinkingOptionId: "xhigh",
       providerOptions: { service_tier: "default" },
     },
-    metadata: { [METADATA_KEYS.roleId]: "backend", [METADATA_KEYS.presetId]: "default-fullstack" },
+    metadata: { [METADATA_KEYS.roleId]: "BACKEND", [METADATA_KEYS.presetId]: "default-fullstack" },
   });
   assert.deepEqual(request.config, { provider: "codex", cwd, title: "[BACKEND] 新建接口" });
 });
 
 test("create preserves explicit options and chooses the metadata role and preferred preset", () => {
   const [preset] = createDefaultPresets();
-  const backend = { ...preset.members[0], model: "auto/gpt-6.2-astra", features: { service_tier: "default", trace: true } };
+  const backend = { ...preset.members[0], model: "auto/gpt-6.1-terra", features: { service_tier: "default", trace: true } };
   const alternate = { ...preset, id: "alternate", members: [backend] };
   const configured = parseTeamSettings({ presets: [preset, alternate], workspaceOverrides: { "~/src/example/": { presetId: "alternate" } } });
   const request = {
@@ -48,11 +52,14 @@ test("create preserves explicit options and chooses the metadata role and prefer
   const result = applyAgentCreateBefore(request, configured, homeDir);
   assert.deepEqual(result, {
     metadata: request.metadata,
-    config: { ...request.config, model: "auto/gpt-6.2-astra", providerOptions: { ...request.config.providerOptions, trace: true } },
+    config: { ...request.config, model: "auto/gpt-6.1-terra", providerOptions: { ...request.config.providerOptions, trace: true } },
   });
-  const byDirectory = applyAgentCreateBefore({ config: { provider: "codex", cwd, title: "[backend] scope" } }, configured, homeDir);
+  const byDirectory = applyAgentCreateBefore({
+    config: { provider: "codex", cwd, title: "[backend] scope" },
+    metadata: { [METADATA_KEYS.roleId]: "backend" },
+  }, configured, homeDir);
   assert.equal(byDirectory?.metadata?.[METADATA_KEYS.presetId], "alternate");
-  assert.equal(byDirectory?.config.model, "auto/gpt-6.2-astra");
+  assert.equal(byDirectory?.config.model, "auto/gpt-6.1-terra");
   const withExplicitModel = applyAgentCreateBefore({ config: { ...request.config, model: "caller-model" }, metadata: request.metadata }, configured, homeDir);
   assert.equal(withExplicitModel?.config.model, "caller-model");
 });
@@ -67,6 +74,20 @@ test("create skips ordinary and unknown titles, provider mismatches and disabled
   for (const off of [{ enabled: false }, { enforceMemberDefaultsOnCreate: false }]) {
     assert.equal(applyAgentCreateBefore({ config }, { ...settings, ...off }, homeDir), undefined);
   }
+});
+
+test("create requires explicit role metadata and an enabled directory scope", () => {
+  assert.equal(applyAgentCreateBefore({ config: { provider: "codex", cwd, title: "[backend] Fix tests" } }, settings, homeDir), undefined);
+  const excluded = parseTeamSettings({ excludedDirectories: ["~/src"] });
+  assert.equal(applyAgentCreateBefore({
+    config: { provider: "codex", cwd, title: "[backend] Fix tests" },
+    metadata: { [METADATA_KEYS.roleId]: "backend" },
+  }, excluded, homeDir), undefined);
+  const workspaceDisabled = parseTeamSettings({ workspaceOverrides: { "~/src/example": { enabled: false } } });
+  assert.equal(applyAgentCreateBefore({
+    config: { provider: "codex", cwd, title: "[backend] Fix tests" },
+    metadata: { [METADATA_KEYS.roleId]: "backend" },
+  }, workspaceDisabled, homeDir), undefined);
 });
 
 test("open skips history and background and adds the commander prompt and roster to an interactive top-level agent", () => {
@@ -93,6 +114,11 @@ test("open gives identified children only role instructions and preserves the ex
   assert.match(result?.appendSystemPrompt?.[0] ?? "", /前端开发[\s\S]*Custom role prompt/);
   assert.doesNotMatch(result?.appendSystemPrompt?.[0] ?? "", /Commander|team_get_roster/);
   assert.equal(applyAgentOpenBefore({ ...openRequest, labels: parentLabel }, settings, tool, homeDir), undefined);
+  assert.equal(applyAgentOpenBefore({
+    ...openRequest,
+    labels: { ...parentLabel, [LABEL_KEYS.role]: "backend" },
+    cwd: `${homeDir}/src/ignored`,
+  }, parseTeamSettings({ excludedDirectories: ["~/src"] }), tool, homeDir), undefined);
   assert.equal(applyAgentOpenBefore(request, { ...configured, enabled: false }, tool, homeDir), undefined);
 });
 

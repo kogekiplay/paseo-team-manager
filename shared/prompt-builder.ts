@@ -64,6 +64,7 @@ export function buildCommanderPrompt({ preset, cwd, workspaceId }: {
     "3. 新建子智能体前调用只读工具 `team_get_roster` 查看最新配置和当前工作区的团队子智能体。同一角色已有健康存活的子智能体时，优先通过 `send_agent_prompt` 复用。",
     "4. 多成员并行修改代码时，先划清各自可写文件边界，必要时使用独立 worktree。",
     "5. 派发时设置 `notifyOnFinish: true`，等待完成回调唤醒，避免循环轮询。",
+    "6. 严格按照名册中的 `provider/model` 派发，禁止擅自升级或切换为 `astra`、`fable` 等高成本模型，除非用户明确要求。",
   );
 
   const extraInstructions = preset.commanderExtraInstructions.trim();

@@ -93,7 +93,7 @@ export function createDefaultPresets(): TeamPreset[] {
         name: "代码审查官",
         enabled: false,
         provider: "codex",
-        model: "auto/gpt-6.2-astra",
+        model: "auto/gpt-6.2-sol",
         thinkingOptionId: "xhigh",
         modeId: "auto",
         features: { service_tier: "default" },
@@ -129,18 +129,41 @@ export function createDefaultPresets(): TeamPreset[] {
   })];
 }
 
-export const teamSettings = defineSettings({
-  id: SETTINGS_ID,
-  scope: "host",
-  version: 1,
-  schema: teamSettingsSchema,
-});
-
 export function parseTeamSettings(raw: unknown): TeamSettingsValues {
   return teamSettingsSchema.parse(raw);
 }
 
 export const DEFAULT_TEAM_SETTINGS = parseTeamSettings({});
+
+export function migrateTeamSettings(values: unknown, fromVersion: number): unknown {
+  if (fromVersion >= 2 || typeof values !== "object" || values === null || Array.isArray(values)) return values;
+  const raw = values as Record<string, unknown>;
+  const presets = Array.isArray(raw.presets)
+    ? raw.presets.map((preset) => {
+      if (typeof preset !== "object" || preset === null || Array.isArray(preset)) return preset;
+      const presetRecord = preset as Record<string, unknown>;
+      const members = Array.isArray(presetRecord.members)
+        ? presetRecord.members.map((member) => {
+          if (typeof member !== "object" || member === null || Array.isArray(member)) return member;
+          const memberRecord = member as Record<string, unknown>;
+          const model = memberRecord.model;
+          if (typeof model !== "string" || !/(astra|fable)/i.test(model)) return member;
+          return { ...memberRecord, model: "auto/gpt-6.2-sol" };
+        })
+        : presetRecord.members;
+      return { ...presetRecord, ...(Array.isArray(presetRecord.members) ? { members } : {}) };
+    })
+    : raw.presets;
+  return { ...raw, ...(Array.isArray(raw.presets) ? { presets } : {}) };
+}
+
+export const teamSettings = defineSettings({
+  id: SETTINGS_ID,
+  scope: "host",
+  version: 2,
+  schema: teamSettingsSchema,
+  migrate: migrateTeamSettings,
+});
 
 export function formatProviderModel(provider: string, model: string): string {
   return model ? `${provider}/${model}` : provider;

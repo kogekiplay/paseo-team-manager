@@ -90,6 +90,8 @@ export function resolveEffectiveTeamConfig({
     .find((item) => item !== undefined) ?? settings.presets[0];
   const selection = { preset, presetId: preset.id, excludedByDirectory };
 
+  if (!settings.enabled) return { ...selection, enabled: false, source: "global-default" };
+
   const metadataEnabled = metadata?.[METADATA_KEYS.teamEnabled];
   if (typeof metadataEnabled === "boolean") return { ...selection, enabled: metadataEnabled, source: "agent-metadata" };
   if (typeof override?.enabled === "boolean") return { ...selection, enabled: override.enabled, source: "workspace-override" };

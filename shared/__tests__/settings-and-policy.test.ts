@@ -14,7 +14,7 @@ const homeDir = "/Users/tester";
 test("the host setting defines the full default team and independent snapshots", () => {
   assert.equal(teamSettings.id, "team");
   assert.equal(teamSettings.scope, "host");
-  assert.equal(teamSettings.version, 1);
+  assert.equal(teamSettings.version, 2);
   assert.deepEqual(parseTeamSettings({}), DEFAULT_TEAM_SETTINGS);
   const { defaultPresetId, presets: [preset], ...settings } = DEFAULT_TEAM_SETTINGS;
   assert.deepEqual(settings, {
@@ -29,7 +29,7 @@ test("the host setting defines the full default team and independent snapshots",
     [roleId, enabled, formatProviderModel(provider, model), thinkingOptionId, modeId, features]), [
     ["backend", true, "codex/auto/gpt-6.2-sol", "xhigh", "full-access", { service_tier: "default" }],
     ["frontend", true, "antigravity/gemini-4-neon", "high", "full-access", {}],
-    ["reviewer", false, "codex/auto/gpt-6.2-astra", "xhigh", "auto", { service_tier: "default" }],
+    ["reviewer", false, "codex/auto/gpt-6.2-sol", "xhigh", "auto", { service_tier: "default" }],
     ["qa", false, "codex/auto/gpt-6.2-sol", "xhigh", "full-access", { service_tier: "default" }],
     ["explorer", false, "antigravity/gemini-4-hydrogen", "medium", "plan", {}],
   ]);
@@ -37,7 +37,7 @@ test("the host setting defines the full default team and independent snapshots",
   assert.deepEqual(new Set(preset.members.map((member) => formatProviderModel(member.provider, member.model))), new Set([
     "codex/auto/gpt-6.2-sol",
     "antigravity/gemini-4-neon",
-    "codex/auto/gpt-6.2-astra",
+    "codex/auto/gpt-6.2-sol",
     "antigravity/gemini-4-hydrogen",
   ]));
   const independent = parseTeamSettings({});
@@ -46,6 +46,31 @@ test("the host setting defines the full default team and independent snapshots",
   assert.deepEqual(parseTeamSettings({}).presets, createDefaultPresets());
   assert.equal(createDefaultPresets()[0].members.length, 5);
   assert.equal(createDefaultPresets()[0].members[0].features.service_tier, "default");
+});
+
+test("settings migration replaces legacy high-cost models while preserving custom settings", () => {
+  const legacy = {
+    enabled: false,
+    customSetting: "preserve me",
+    presets: [{
+      id: "custom", name: "Custom", commanderExtraInstructions: "Keep this",
+      members: [
+        { id: "one", roleId: "one", name: "One", provider: "codex", model: "auto/gpt-6.2-AsTrA", enabled: false },
+        { id: "two", roleId: "two", name: "Two", provider: "codex", model: "auto/gpt-6.1-FABLE", features: { custom: true } },
+        { id: "three", roleId: "three", name: "Three", provider: "codex", model: "auto/gpt-6.1-terra" },
+      ],
+    }],
+  };
+  const migrated = teamSettings.migrate!(legacy, 1) as typeof legacy;
+  assert.equal(migrated.enabled, false);
+  assert.equal(migrated.customSetting, "preserve me");
+  assert.equal(migrated.presets[0].commanderExtraInstructions, "Keep this");
+  assert.equal(migrated.presets[0].members[0].model, "auto/gpt-6.2-sol");
+  assert.equal(migrated.presets[0].members[1].model, "auto/gpt-6.2-sol");
+  assert.equal(migrated.presets[0].members[1].features?.custom, true);
+  assert.equal(migrated.presets[0].members[2].model, "auto/gpt-6.1-terra");
+  assert.equal((legacy.presets[0].members[0] as { model: string }).model, "auto/gpt-6.2-AsTrA");
+  assert.deepEqual(teamSettings.migrate!(legacy, 2), legacy);
 });
 
 test("settings validate required fields, role IDs, feature values and preset presence", () => {
@@ -96,6 +121,21 @@ test("team enablement follows metadata, workspace, exclusion and global in order
     assert.equal(resolveEffectiveTeamConfig({ settings: parseTeamSettings(override) }).enabled, false);
   }
   assert.deepEqual(resolveWorkspaceOverride(settings, { workspaceId, cwd, homeDir }), { enabled: true });
+});
+
+test("the global setting is a hard gate over session and workspace enablement", () => {
+  const settings = parseTeamSettings({
+    enabled: false,
+    workspaceOverrides: { "workspace-1": { enabled: true } },
+  });
+  const effective = resolveEffectiveTeamConfig({
+    settings,
+    workspaceId: "workspace-1",
+    cwd: "/project",
+    metadata: { [METADATA_KEYS.teamEnabled]: true },
+  });
+  assert.equal(effective.enabled, false);
+  assert.equal(effective.source, "global-default");
 });
 
 test("preset selection falls through valid IDs and role lookups search preferred then default", () => {

@@ -10,11 +10,14 @@ export function applyAgentCreateBefore(
 ): PluginHookRequests["agent.create.before"] | undefined {
   if (!settings.enabled || !settings.enforceMemberDefaultsOnCreate) return;
   const { config, metadata } = request;
-  const roleId = resolveSubagentRoleId({ metadata, title: config.title });
+  const metadataRole = metadata?.[METADATA_KEYS.roleId];
+  if (typeof metadataRole !== "string" || !metadataRole.trim()) return;
+  const roleId = metadataRole.trim().toLowerCase();
   if (!roleId) return;
 
-  const { presetId } = resolveEffectiveTeamConfig({ settings, cwd: config.cwd, metadata, homeDir });
-  const match = findMemberByRole(settings, roleId, presetId);
+  const effective = resolveEffectiveTeamConfig({ settings, cwd: config.cwd, metadata, homeDir });
+  if (!effective.enabled) return;
+  const match = findMemberByRole(settings, roleId, effective.presetId);
   if (!match || config.provider !== match.member.provider) return;
 
   const { member, preset } = match;
@@ -52,7 +55,8 @@ export function applyAgentOpenBefore(
 
   if (isSubagentLabels(labels)) {
     if (!settings.enabled) return;
-    const roleId = resolveSubagentRoleId({ labels, metadata, title });
+    if (!effective.enabled) return;
+    const roleId = resolveSubagentRoleId({ labels, metadata });
     if (!roleId) return;
     // Creation can infer a metadata preset before it has access to the caller's labels.
     const labeledPreset = settings.presets.find((preset) => preset.id === labels[LABEL_KEYS.preset]?.trim());
