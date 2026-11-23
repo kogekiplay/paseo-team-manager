@@ -2,6 +2,7 @@
   "name": "paseo-team-manager",
   "private": true,
   "version": "0.0.0",
+  "type": "module",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
@@ -15,7 +16,11 @@
     "shared/"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --test shared/__tests__/*.test.ts server/__tests__/*.test.ts client/__tests__/*.test.ts",
+    "test:shared": "node --test shared/__tests__/*.test.ts",
+    "test:server": "node --test server/__tests__/*.test.ts",
+    "test:client": "node --test client/__tests__/*.test.ts"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.17.1",

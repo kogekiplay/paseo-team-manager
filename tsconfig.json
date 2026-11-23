@@ -7,9 +7,12 @@
       "ES2023"
     ],
     "types": [
-      "react"
+      "react",
+      "node"
     ],
     "jsx": "react-jsx",
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
@@ -19,5 +22,8 @@
   "include": [
     "**/*.ts",
     "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules"
   ]
 }
