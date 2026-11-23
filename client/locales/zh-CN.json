@@ -139,6 +139,7 @@
     "autoPreviewLabel": "宿主机实时匹配预览",
     "autoPreviewMatched": "当前宿主机将匹配：{{summary}}",
     "autoPreviewUnresolved": "当前宿主机暂未发现就绪的可用模型，运行时将跟随调用方模型提供方。",
+    "autoModeHint": "权限模式将保持未设置（跟随宿主机默认）；如需显式指定权限模式，请先选择具体提供方。",
     "modelLabel": "模型",
     "modelUnavailable": "{{label}}（自定义 / 不可用）",
     "modelRequired": "请选择或填写模型。",

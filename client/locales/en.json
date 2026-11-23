@@ -139,6 +139,7 @@
     "autoPreviewLabel": "Host auto-match preview",
     "autoPreviewMatched": "This host will match: {{summary}}",
     "autoPreviewUnresolved": "No ready provider model matched on this host yet. Runtime will follow the caller's provider.",
+    "autoModeHint": "Permission mode stays unset (follows host default). Choose a specific provider to set a mode explicitly.",
     "modelLabel": "Model",
     "modelUnavailable": "{{label}} (Custom / Unavailable)",
     "modelRequired": "Select or enter a model.",

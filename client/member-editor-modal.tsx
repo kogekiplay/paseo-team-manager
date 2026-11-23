@@ -94,14 +94,6 @@ function pickDefaultModel(entry: ProviderCatalogEntry | undefined): ProviderCata
   return pool.find((item) => item.isDefault) ?? pool[0];
 }
 
-function pickDefaultMode(entry: ProviderCatalogEntry | undefined): Str {
-  if (!entry) return "full-access";
-  if (entry.defaultModeId) return entry.defaultModeId;
-  const fullAccess = entry.modes.find((mode) => mode.id === "full-access");
-  if (fullAccess) return fullAccess.id;
-  return entry.modes[0]?.id ?? "";
-}
-
 function pickDefaultThinking(
   providerId: Str,
   model: ProviderCatalogModel | undefined,
@@ -218,7 +210,7 @@ export function MemberEditorModal({
       provider: AUTO_PROVIDER,
       model: "",
       thinkingOptionId: draft.thinkingOptionId.trim(),
-      modeId: draft.modeId.trim(),
+      modeId: "",
       features: {},
       responsibilities: "",
       rolePrompt: "",
@@ -231,7 +223,6 @@ export function MemberEditorModal({
     draft.name,
     draft.enabled,
     draft.thinkingOptionId,
-    draft.modeId,
     providers,
   ]);
 
@@ -414,7 +405,7 @@ export function MemberEditorModal({
             provider: nextProvider,
             model: resolvedForProvider.model,
             thinkingOptionId: resolvedForProvider.thinkingOptionId,
-            modeId: resolvedForProvider.modeId,
+            modeId: "",
             features: { ...resolvedForProvider.features },
           };
         }
@@ -424,7 +415,7 @@ export function MemberEditorModal({
           provider: nextProvider,
           model: nextDefaultModel?.id ?? "",
           thinkingOptionId: pickDefaultThinking(nextProvider, nextDefaultModel),
-          modeId: pickDefaultMode(nextEntry),
+          modeId: "",
           features: pickDefaultFeatures(nextEntry),
         };
       });
@@ -533,7 +524,7 @@ export function MemberEditorModal({
       provider: trimmedProvider,
       model: isAuto ? "" : trimmedModel,
       thinkingOptionId: draft.thinkingOptionId.trim(),
-      modeId: draft.modeId.trim(),
+      modeId: isAuto ? "" : draft.modeId.trim(),
       features: isAuto ? {} : draft.features,
       responsibilities: draft.responsibilities,
       rolePrompt: draft.rolePrompt,
@@ -768,6 +759,9 @@ export function MemberEditorModal({
                         })
                       : t("memberModal.autoPreviewUnresolved")}
                   </Text>
+                  <Text style={styles.mutedText}>
+                    {t("memberModal.autoModeHint")}
+                  </Text>
                 </View>
               </View>
             ) : modelOptions.length > 0 ? (
@@ -804,17 +798,19 @@ export function MemberEditorModal({
               }
             />
 
-            <SettingsSelect<Str>
-              label={t("memberModal.modeLabel")}
-              value={draft.modeId || EMPTY_OPTION_VALUE}
-              options={modeOptions}
-              onValueChange={(value) =>
-                setDraft((current) => ({
-                  ...current,
-                  modeId: value === EMPTY_OPTION_VALUE ? "" : value,
-                }))
-              }
-            />
+            {!isAutoProvider ? (
+              <SettingsSelect<Str>
+                label={t("memberModal.modeLabel")}
+                value={draft.modeId || EMPTY_OPTION_VALUE}
+                options={modeOptions}
+                onValueChange={(value) =>
+                  setDraft((current) => ({
+                    ...current,
+                    modeId: value === EMPTY_OPTION_VALUE ? "" : value,
+                  }))
+                }
+              />
+            ) : null}
           </SettingsCard>
 
           {!isAutoProvider && (controlsLoading || controlsError || controls.length > 0) ? (

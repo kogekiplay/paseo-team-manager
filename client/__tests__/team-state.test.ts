@@ -419,23 +419,37 @@ describe("brand SVG icon and host auto-match helpers", () => {
     assert.equal(lockedBackend?.provider, "codex");
     assert.equal(lockedBackend?.model, "auto/gpt-6.2-sol");
     assert.equal(lockedBackend?.thinkingOptionId, "xhigh");
+    assert.equal(lockedBackend?.modeId, "");
     assert.deepEqual(lockedBackend?.features, { service_tier: "default" });
     assert.equal(lockedFrontend?.provider, "antigravity");
     assert.equal(lockedFrontend?.model, "gemini-4-neon");
+    assert.equal(lockedFrontend?.modeId, "");
 
+    // Explicit same-provider modeId is preserved when locking host defaults
+    const withExplicitMode = upsertMember(locked, {
+      ...lockedBackend!,
+      modeId: "full-access",
+    });
+    const relocked = lockPresetMembersToHost(withExplicitMode, sampleCatalog);
+    assert.equal(
+      relocked.preset.members.find((m) => m.roleId === "backend")?.modeId,
+      "full-access",
+    );
+
+    // Cross-provider fallback must clear modeId rather than carrying over or elevating permissions
     const withUnavailable = upsertMember(locked, {
       ...lockedBackend!,
       provider: "missing-provider",
       model: "missing-model",
+      modeId: "full-access",
     });
     const { resolved } = resolvePresetMembers(withUnavailable, sampleCatalog);
     const fallbackItem = resolved.find((r) => r.configured.roleId === "backend");
     assert.equal(fallbackItem?.status, "fallback-host");
     const applied = applyResolvedFallbackToMember(withUnavailable, fallbackItem!);
-    assert.equal(
-      applied.members.find((m) => m.roleId === "backend")?.provider,
-      "codex",
-    );
+    const appliedBackend = applied.members.find((m) => m.roleId === "backend");
+    assert.equal(appliedBackend?.provider, "codex");
+    assert.equal(appliedBackend?.modeId, "");
 
     const allAuto = setAllPresetMembersAuto(locked);
     for (const member of allAuto.members) {

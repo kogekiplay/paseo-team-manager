@@ -11,10 +11,11 @@ Commanders delegate work through Paseo's native `create_agent` and `send_agent_p
 
 ### Zero-config host auto-matching
 
-All roles in the built-in full-stack preset (`backend`, `frontend`, `reviewer`, `qa`, `explorer`) default to `provider: "auto"`. At runtime, the plugin inspects the live catalog of enabled and ready providers on the connected host and picks a real available model, thinking level, session mode, and provider option set for each role.
+All roles in the built-in full-stack preset (`backend`, `frontend`, `reviewer`, `qa`, `explorer`) default to `provider: "auto"`. At runtime, the plugin inspects the live catalog of enabled and ready providers on the connected host and picks a real available model, thinking level, and host-supported provider options for each role.
 
 - Works across Magpie routing groups, native Codex, Claude Code, Antigravity, and other custom providers configured on your host.
 - Automatically avoids high-cost models such as `astra` and `fable` during auto-matching and appends `service_tier: "default"` only when the host provider actually exposes that control.
+- Session permission mode (`modeId`) stays unset during auto-matching and cross-provider fallback, inheriting the host default permissions. A permission mode is only sent when you explicitly pick one for a specific provider.
 - If a locked provider or model is unavailable on a different machine, the runtime falls back to an available host model (or the caller's provider) without overwriting your saved preset, and offers a one-click Apply fallback action in settings.
 
 ## Setup and requirements
