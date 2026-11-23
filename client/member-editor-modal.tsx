@@ -29,6 +29,9 @@ import { messages } from "./messages.ts";
 import {
   generateUniqueId,
   isValidRoleId,
+  localizeModeLabel,
+  localizeProviderControl,
+  localizeThinkingLabel,
   slugifyIdentifier,
 } from "./team-state.ts";
 
@@ -155,7 +158,7 @@ export function MemberEditorModal({
   onClose,
   onSave,
 }: MemberEditorModalProps) {
-  const { t } = useTranslation(messages);
+  const { t, locale } = useTranslation(messages);
   const fetchProviderControls = useRpc(getProviderControlsRpc);
 
   const [draft, setDraft] = useState<MemberDraft>(() =>
@@ -282,7 +285,7 @@ export function MemberEditorModal({
     ];
     const fromModel = (selectedModelEntry?.thinkingOptions ?? []).map((item) => ({
       value: item.id,
-      label: item.label || item.id,
+      label: localizeThinkingLabel(item.id, item.label || item.id, locale),
     }));
     const list = [...base, ...fromModel];
     if (
@@ -291,11 +294,15 @@ export function MemberEditorModal({
     ) {
       list.push({
         value: draft.thinkingOptionId,
-        label: draft.thinkingOptionId,
+        label: localizeThinkingLabel(
+          draft.thinkingOptionId,
+          draft.thinkingOptionId,
+          locale,
+        ),
       });
     }
     return list;
-  }, [selectedModelEntry, draft.thinkingOptionId, t]);
+  }, [selectedModelEntry, draft.thinkingOptionId, locale, t]);
 
   const modeOptions = useMemo(() => {
     const base = [
@@ -303,17 +310,17 @@ export function MemberEditorModal({
     ];
     const fromProvider = (selectedProviderEntry?.modes ?? []).map((item) => ({
       value: item.id,
-      label: item.label || item.id,
+      label: localizeModeLabel(item.id, item.label || item.id, locale),
     }));
     const list = [...base, ...fromProvider];
     if (draft.modeId && !list.some((item) => item.value === draft.modeId)) {
       list.push({
         value: draft.modeId,
-        label: draft.modeId,
+        label: localizeModeLabel(draft.modeId, draft.modeId, locale),
       });
     }
     return list;
-  }, [selectedProviderEntry, draft.modeId, t]);
+  }, [selectedProviderEntry, draft.modeId, locale, t]);
 
   const handleProviderChange = useCallback(
     (nextProvider: Str) => {
@@ -685,7 +692,8 @@ export function MemberEditorModal({
                 ) : null}
               </SettingsRow>
 
-              {controls.map((control) => {
+              {controls.map((rawControl) => {
+                const control = localizeProviderControl(rawControl, locale);
                 if (control.type === "toggle") {
                   const rawValue = draft.features[control.key];
                   const fallbackDefault =

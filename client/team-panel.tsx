@@ -31,6 +31,8 @@ import {
 } from "./settings-store.ts";
 import {
   formatMemberSummary,
+  localizeModeLabel,
+  localizeThinkingLabel,
   updateWorkspaceOverride,
 } from "./team-state.ts";
 
@@ -112,7 +114,7 @@ function TeamPanelView({
   layout,
   navigation,
 }: TeamPanelViewProps) {
-  const { t } = useTranslation(messages);
+  const { t, locale } = useTranslation(messages);
   const toast = useToast();
   const paseo = usePaseo();
   const fetchTeamState = useRpc(getWorkspaceTeamStateRpc);
@@ -728,7 +730,9 @@ function TeamPanelView({
                     <Text style={styles.pillTextSuccess}>{member.roleId}</Text>
                   </View>
                 </View>
-                <Text style={styles.infoLine}>{formatMemberSummary(member)}</Text>
+                <Text style={styles.infoLine}>
+                  {formatMemberSummary(member, locale)}
+                </Text>
                 {member.responsibilities.trim() ? (
                   <Text style={styles.mutedText}>
                     {member.responsibilities.trim()}
@@ -756,7 +760,7 @@ function TeamPanelView({
                     </View>
                   </View>
                   <Text style={styles.mutedText}>
-                    {formatMemberSummary(member)}
+                    {formatMemberSummary(member, locale)}
                   </Text>
                 </View>
               ))}
@@ -846,8 +850,12 @@ function TeamPanelView({
 
                   <Text style={styles.mutedText}>
                     {t(getStatusLabelKey(item.status))} · {providerLabel}
-                    {item.thinkingOptionId ? ` · ${item.thinkingOptionId}` : ""}
-                    {item.modeId ? ` · ${item.modeId}` : ""}
+                    {item.thinkingOptionId
+                      ? ` · ${localizeThinkingLabel(item.thinkingOptionId, item.thinkingOptionId, locale)}`
+                      : ""}
+                    {item.modeId
+                      ? ` · ${localizeModeLabel(item.modeId, item.modeId, locale)}`
+                      : ""}
                   </Text>
                 </View>
               );

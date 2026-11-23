@@ -1,3 +1,4 @@
+import type { ProviderCatalogControl } from "../shared/contracts.ts";
 import { normalizeDirectoryPath } from "../shared/policy.ts";
 import {
   formatProviderModel,
@@ -314,19 +315,183 @@ export function deleteMember(preset: TeamPreset, memberId: Str): TeamPreset {
   };
 }
 
-export function formatMemberSummary(member: TeamMember): Str {
+export function isChineseLocale(locale?: Str): Bool {
+  return Boolean(locale && locale.trim().toLowerCase().startsWith("zh"));
+}
+
+const THINKING_ZH_MAP: Readonly<Record<Str, Str>> = {
+  low: "轻度",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+  extra: "极高",
+  "extra high": "极高",
+  max: "最大",
+  maximum: "最大",
+  ultra: "Ultra",
+  minimal: "最低",
+  none: "无",
+};
+
+const MODE_ZH_MAP: Readonly<Record<Str, Str>> = {
+  default: "默认",
+  "default permissions": "默认权限",
+  "accept-edits": "自动接受编辑",
+  "accept edits": "自动接受编辑",
+  auto: "自动",
+  "auto-review": "自动审查",
+  "auto review": "自动审查",
+  plan: "计划",
+  "full-access": "完全访问",
+  "full access": "完全访问",
+  bypass: "跳过权限确认",
+  "bypass permissions": "跳过权限确认",
+  "read-only": "只读",
+  "read only": "只读",
+};
+
+const SERVICE_TIER_ZH_MAP: Readonly<Record<Str, Str>> = {
+  default: "普通",
+  normal: "普通",
+  flex: "弹性",
+  priority: "快速",
+  fast: "快速",
+  ultrafast: "超级快速",
+  standard: "标准",
+};
+
+export function localizeThinkingLabel(
+  id: Str,
+  label: Str,
+  locale?: Str,
+): Str {
+  const fallback = label || id;
+  if (!isChineseLocale(locale)) return fallback;
+  const byLabel = THINKING_ZH_MAP[label.trim().toLowerCase()];
+  if (byLabel) return byLabel;
+  const byId = THINKING_ZH_MAP[id.trim().toLowerCase()];
+  if (byId) return byId;
+  return fallback;
+}
+
+export function localizeModeLabel(
+  id: Str,
+  label: Str,
+  locale?: Str,
+): Str {
+  const fallback = label || id;
+  if (!isChineseLocale(locale)) return fallback;
+  const byLabel = MODE_ZH_MAP[label.trim().toLowerCase()];
+  if (byLabel) return byLabel;
+  const byId = MODE_ZH_MAP[id.trim().toLowerCase()];
+  if (byId) return byId;
+  return fallback;
+}
+
+export function localizeProviderControl(
+  control: ProviderCatalogControl,
+  locale?: Str,
+): ProviderCatalogControl {
+  if (!isChineseLocale(locale)) return control;
+  const key = control.key.trim().toLowerCase();
+  const label = control.label.trim().toLowerCase();
+
+  if (key === "service_tier" || label === "speed") {
+    const description =
+      control.description &&
+      control.description.toLowerCase().includes("choose processing speed")
+        ? "选择处理速度。更快的层级会增加用量。"
+        : control.description;
+    if (control.type === "select") {
+      return {
+        ...control,
+        label: "速度",
+        description,
+        choices: control.choices.map((choice) => {
+          const mapped =
+            SERVICE_TIER_ZH_MAP[choice.label.trim().toLowerCase()] ??
+            SERVICE_TIER_ZH_MAP[choice.value.trim().toLowerCase()];
+          return mapped ? { ...choice, label: mapped } : choice;
+        }),
+      };
+    }
+    return {
+      ...control,
+      label: "速度",
+      description,
+    };
+  }
+
+  if (key === "plan_mode" || label === "plan" || label === "plan mode") {
+    const description =
+      control.description &&
+      control.description.toLowerCase().includes("planning-only")
+        ? "将 Codex 切换为仅规划协作模式"
+        : control.description;
+    return {
+      ...control,
+      label: "计划模式",
+      description,
+    };
+  }
+
+  if (key === "fast_mode" || label === "fast mode") {
+    return {
+      ...control,
+      label: "快速模式",
+    };
+  }
+
+  if (key === "auto_accept" || label === "auto accept") {
+    return {
+      ...control,
+      label: "自动接受",
+    };
+  }
+
+  return control;
+}
+
+function formatLocalizedFeatureEntry(
+  key: Str,
+  value: Str | Bool | number,
+  locale?: Str,
+): Str {
+  if (!isChineseLocale(locale)) {
+    return `${key}=${String(value)}`;
+  }
+  const normalizedKey = key.trim().toLowerCase();
+  if (normalizedKey === "service_tier") {
+    const mapped = SERVICE_TIER_ZH_MAP[String(value).trim().toLowerCase()];
+    return `速度=${mapped ?? String(value)}`;
+  }
+  if (normalizedKey === "plan_mode") {
+    return `计划模式=${typeof value === "boolean" ? (value ? "开" : "关") : String(value)}`;
+  }
+  if (normalizedKey === "fast_mode") {
+    return `快速模式=${typeof value === "boolean" ? (value ? "开" : "关") : String(value)}`;
+  }
+  if (normalizedKey === "auto_accept") {
+    return `自动接受=${typeof value === "boolean" ? (value ? "开" : "关") : String(value)}`;
+  }
+  return `${key}=${String(value)}`;
+}
+
+export function formatMemberSummary(member: TeamMember, locale?: Str): Str {
   const parts: Str[] = [formatProviderModel(member.provider, member.model)];
   if (member.thinkingOptionId.trim()) {
-    parts.push(member.thinkingOptionId.trim());
+    const thinking = member.thinkingOptionId.trim();
+    parts.push(localizeThinkingLabel(thinking, thinking, locale));
   }
   if (member.modeId.trim()) {
-    parts.push(member.modeId.trim());
+    const mode = member.modeId.trim();
+    parts.push(localizeModeLabel(mode, mode, locale));
   }
   const featureEntries = Object.entries(member.features).sort(([a], [b]) =>
     a.localeCompare(b),
   );
   for (const [key, value] of featureEntries) {
-    parts.push(`${key}=${String(value)}`);
+    parts.push(formatLocalizedFeatureEntry(key, value, locale));
   }
   return parts.join(" · ");
 }

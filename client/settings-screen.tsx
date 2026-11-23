@@ -101,7 +101,7 @@ function ReadyTeamSettingsContent({
   readonly theme: PluginSurfaceProps["theme"];
   readonly layout: PluginSurfaceProps["layout"];
 }) {
-  const { t } = useTranslation(messages);
+  const { t, locale } = useTranslation(messages);
   const toast = useToast();
 
   const fetchProviderCatalog = useRpc(getProviderCatalogRpc);
@@ -1151,7 +1151,7 @@ function ReadyTeamSettingsContent({
                   </View>
 
                   <Text style={styles.memberSummary}>
-                    {formatMemberSummary(member)}
+                    {formatMemberSummary(member, locale)}
                   </Text>
 
                   {member.responsibilities.trim() ? (
@@ -1304,7 +1304,7 @@ function ReadyTeamSettingsContent({
 }
 
 export function TeamSettingsScreen({ theme, layout }: PluginSurfaceProps) {
-  const { t } = useTranslation(messages);
+  const { t, locale } = useTranslation(messages);
   const settings = useSettings(teamSettings);
 
   const styles = useMemo(
