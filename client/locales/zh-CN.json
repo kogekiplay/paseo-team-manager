@@ -11,18 +11,17 @@
     "resetSuccessToast": "已恢复默认团队设置",
     "savedToast": "团队设置已保存",
     "saveFailedToast": "保存设置失败：{{error}}",
-    "discardedToast": "已放弃未保存的修改",
     "sections": {
       "general": "通用设置",
       "excludedDirs": "排除目录",
       "presets": "团队模板管理",
       "members": "团队成员管理",
       "preview": "注入指令实时预览",
-      "actions": "保存与重置"
+      "actions": "同步与重置"
     },
     "general": {
       "enabledLabel": "启用团队管理",
-      "enabledHint": "全局总开关，控制是否注入指挥编排指令及团队名册只读工具。",
+      "enabledHint": "全局总开关。关闭后将立即停止所有会话与工作区的团队指挥指令与名册工具注入。",
       "autoApplyLabel": "新顶层会话自动启用指挥模式",
       "autoApplyHint": "新打开的顶层对话默认作为指挥会话运行，除非被排除目录或手动覆盖关闭。",
       "showComposerLabel": "输入框显示团队模式切换控件",
@@ -88,6 +87,7 @@
       "enabledBadge": "已启用",
       "optionalBadge": "可选",
       "toggleA11y": "切换角色 {{name}} 启用状态",
+      "savedToast": "已保存角色：{{name}}",
       "removedToast": "已删除角色：{{name}}"
     },
     "preview": {
@@ -100,12 +100,10 @@
       "fallbackHint": "当前展示本地即时预览。"
     },
     "actions": {
-      "saveLabel": "保存配置修改",
-      "saveHint": "保存排除目录、团队模板及成员配置修改。",
-      "saveAction": "保存更改",
-      "discardLabel": "放弃未保存修改",
-      "discardAction": "放弃更改",
-      "unsavedHint": "有尚未保存的配置更改。"
+      "autoSaveLabel": "自动保存",
+      "autoSaveIdle": "所有更改会自动保存。",
+      "autoSaveSaving": "正在保存…",
+      "autoSavePausedEmptyName": "已暂停自动保存：团队模板名称不能为空。"
     }
   },
   "memberModal": {
@@ -140,7 +138,8 @@
     "responsibilitiesPlaceholder": "简述该角色负责的模块与职责范围。",
     "rolePromptLabel": "角色专属指令",
     "rolePromptPlaceholder": "该角色子智能体打开时自动追加的专属规范与回报要求…",
-    "saveAction": "应用角色",
+    "saveAction": "保存角色",
+    "savingAction": "保存中…",
     "cancelAction": "取消"
   },
   "composer": {

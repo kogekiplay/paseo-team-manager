@@ -41,6 +41,7 @@ type NullableStr = Str | null;
 type FeatureMap = Record<Str, FeatureValue>;
 type FeatureDefaultMap = Record<Str, FeatureValue | null>;
 type ControlList = readonly ProviderCatalogControl[];
+type AsyncSaveResult = Promise<Bool>;
 
 interface MemberDraft {
   readonly id: Str;
@@ -64,7 +65,7 @@ export interface MemberEditorModalProps {
   readonly theme: PluginSurfaceProps["theme"];
   readonly layout: PluginSurfaceProps["layout"];
   readonly onClose: () => void;
-  readonly onSave: (member: TeamMember) => void;
+  readonly onSave: (member: TeamMember) => AsyncSaveResult;
 }
 
 const EMPTY_OPTION_VALUE = "__default__";
@@ -174,6 +175,7 @@ export function MemberEditorModal({
   const [controlDefaults, setControlDefaults] = useState<FeatureDefaultMap>({});
   const [controlsLoading, setControlsLoading] = useState<Bool>(false);
   const [controlsError, setControlsError] = useState<NullableStr>(null);
+  const [submitting, setSubmitting] = useState<Bool>(false);
   const controlsRequestRef = useRef(0);
   const wasOpenRef = useRef(false);
 
@@ -190,6 +192,7 @@ export function MemberEditorModal({
     setControls([]);
     setControlDefaults({});
     setControlsError(null);
+    setSubmitting(false);
   }, [open, initialMember, providers]);
 
   const selectedProviderEntry = useMemo(
@@ -377,7 +380,8 @@ export function MemberEditorModal({
     });
   }, []);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
+    if (submitting) return;
     const trimmedName = draft.name.trim();
     const trimmedRoleId = draft.roleId.trim();
     const trimmedProvider = draft.provider.trim();
@@ -444,8 +448,14 @@ export function MemberEditorModal({
       responsibilities: draft.responsibilities,
       rolePrompt: draft.rolePrompt,
     });
-    onSave(parsed);
-  }, [draft, existingMembers, initialMember, onSave, t]);
+
+    setSubmitting(true);
+    try {
+      await onSave(parsed);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [submitting, draft, existingMembers, initialMember, onSave, t]);
 
   const styles = useMemo(
     () =>
@@ -524,6 +534,9 @@ export function MemberEditorModal({
           color: theme.colors.accentForeground,
           fontSize: 13.5,
           fontWeight: "600",
+        },
+        primaryBtnDisabled: {
+          opacity: 0.55,
         },
         secondaryBtn: {
           backgroundColor: theme.colors.surface2,
@@ -807,8 +820,12 @@ export function MemberEditorModal({
           <View style={styles.footerRow}>
             <Pressable
               accessibilityRole="button"
+              disabled={submitting}
               onPress={onClose}
-              style={styles.secondaryBtn}
+              style={[
+                styles.secondaryBtn,
+                submitting ? styles.primaryBtnDisabled : null,
+              ]}
             >
               <Text style={styles.secondaryBtnText}>
                 {t("memberModal.cancelAction")}
@@ -816,8 +833,12 @@ export function MemberEditorModal({
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              onPress={handleSave}
-              style={styles.primaryBtn}
+              disabled={submitting}
+              onPress={() => void handleSave()}
+              style={[
+                styles.primaryBtn,
+                submitting ? styles.primaryBtnDisabled : null,
+              ]}
             >
               <Icon
                 name="Check"
@@ -825,7 +846,9 @@ export function MemberEditorModal({
                 color={theme.colors.accentForeground}
               />
               <Text style={styles.primaryBtnText}>
-                {t("memberModal.saveAction")}
+                {submitting
+                  ? t("memberModal.savingAction")
+                  : t("memberModal.saveAction")}
               </Text>
             </Pressable>
           </View>

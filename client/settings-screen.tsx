@@ -60,20 +60,25 @@ type Bool = boolean;
 type NullableStr = Str | null;
 type NullableCatalog = ProviderCatalogOutput | null;
 type NullableMember = TeamMember | null;
+type SetTimeoutFn = typeof setTimeout;
+type TimerHandle = ReturnType<SetTimeoutFn> | null;
+type SaveResolver = (ok: Bool) => void;
+type AsyncBool = Promise<Bool>;
+
+interface QueuedSave {
+  readonly values: TeamSettingsValues;
+  readonly resolvers: SaveResolver[];
+}
 
 const EMPTY_PROVIDERS: readonly ProviderCatalogEntry[] = [];
 const EMPTY_MEMBERS: readonly TeamMember[] = [];
+const TEXT_AUTOSAVE_DEBOUNCE_MS = 500;
+const REVISION_WAIT_FALLBACK_MS = 250;
 
-interface TeamDraft {
-  readonly excludedDirectories: Str[];
-  readonly defaultPresetId: Str;
-  readonly presets: TeamPreset[];
-}
-
-function buildDraft(values: TeamSettingsValues): TeamDraft {
+function cloneSettingsValues(values: TeamSettingsValues): TeamSettingsValues {
   return {
+    ...values,
     excludedDirectories: [...values.excludedDirectories],
-    defaultPresetId: values.defaultPresetId,
     presets: values.presets.map((preset) => ({
       ...preset,
       members: preset.members.map((member) => ({
@@ -81,15 +86,35 @@ function buildDraft(values: TeamSettingsValues): TeamDraft {
         features: { ...member.features },
       })),
     })),
+    workspaceOverrides: { ...values.workspaceOverrides },
   };
 }
 
-function serializeDraft(draft: TeamDraft): Str {
-  return JSON.stringify({
-    excludedDirectories: draft.excludedDirectories,
-    defaultPresetId: draft.defaultPresetId,
-    presets: draft.presets,
-  });
+function prepareSettingsForSave(
+  values: TeamSettingsValues,
+  homeDir?: Str,
+): TeamSettingsValues | null {
+  if (values.presets.some((preset) => preset.name.trim() === "")) {
+    return null;
+  }
+  const normalizedDirs = normalizeExcludedDirectories(
+    values.excludedDirectories,
+    homeDir,
+  );
+  const validDefault = values.presets.some(
+    (item) => item.id === values.defaultPresetId,
+  )
+    ? values.defaultPresetId
+    : values.presets[0].id;
+  return {
+    ...values,
+    excludedDirectories: normalizedDirs,
+    defaultPresetId: validDefault,
+    presets: values.presets.map((preset) => ({
+      ...preset,
+      name: preset.name.trim(),
+    })),
+  };
 }
 
 function ReadyTeamSettingsContent({
@@ -111,9 +136,12 @@ function ReadyTeamSettingsContent({
     syncSettingsSnapshot(settings.values, settings.revision);
   }, [settings.values, settings.revision]);
 
-  const [draft, setDraft] = useState<TeamDraft>(() => buildDraft(settings.values));
-  const [draftRevision, setDraftRevision] = useState<Str>(settings.revision);
-  const ownImmediateSavePendingRef = useRef(false);
+  const [localValues, setLocalValues] = useState<TeamSettingsValues>(() =>
+    cloneSettingsValues(settings.values),
+  );
+  const localValuesRef = useRef<TeamSettingsValues>(localValues);
+  const settingsRef = useRef<ReadySettings>(settings);
+  settingsRef.current = settings;
 
   const [selectedPresetId, setSelectedPresetId] = useState<Str>(
     () => settings.values.defaultPresetId || settings.values.presets[0]?.id || "",
@@ -123,6 +151,8 @@ function ReadyTeamSettingsContent({
   const [catalog, setCatalog] = useState<NullableCatalog>(null);
   const [catalogLoading, setCatalogLoading] = useState<Bool>(false);
   const [catalogError, setCatalogError] = useState<NullableStr>(null);
+  const catalogHomeDirRef = useRef<Str | undefined>(undefined);
+  catalogHomeDirRef.current = catalog?.homeDir;
 
   const [memberModalOpen, setMemberModalOpen] = useState<Bool>(false);
   const [editingMember, setEditingMember] = useState<NullableMember>(null);
@@ -132,35 +162,165 @@ function ReadyTeamSettingsContent({
   const [previewLoading, setPreviewLoading] = useState<Bool>(false);
   const previewReqRef = useRef(0);
 
-  const isDraftDirty = useMemo(
-    () => serializeDraft(draft) !== serializeDraft(buildDraft(settings.values)),
-    [draft, settings.values],
+  const [autoSaving, setAutoSaving] = useState<Bool>(false);
+  const [localSaveError, setLocalSaveError] = useState<NullableStr>(null);
+
+  const inFlightRef = useRef<Bool>(false);
+  const awaitingRevisionFromRef = useRef<NullableStr>(null);
+  const pendingSaveRef = useRef<QueuedSave | null>(null);
+  const debounceTimerRef = useRef<TimerHandle>(null);
+  const revisionFallbackTimerRef = useRef<TimerHandle>(null);
+  const lastSyncedRevisionRef = useRef<Str>(settings.revision);
+  const mountedRef = useRef<Bool>(true);
+
+  const clearDebounceTimer = useCallback(() => {
+    if (debounceTimerRef.current !== null) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+  }, []);
+
+  const clearRevisionFallbackTimer = useCallback(() => {
+    if (revisionFallbackTimerRef.current !== null) {
+      clearTimeout(revisionFallbackTimerRef.current);
+      revisionFallbackTimerRef.current = null;
+    }
+  }, []);
+
+  const peekPendingSave = useCallback(
+    (): QueuedSave | null => pendingSaveRef.current,
+    [],
+  );
+
+  const flushQueue = useCallback(async () => {
+    if (inFlightRef.current || awaitingRevisionFromRef.current !== null) {
+      return;
+    }
+    const nextQueued = pendingSaveRef.current;
+    if (!nextQueued) {
+      if (mountedRef.current) setAutoSaving(false);
+      return;
+    }
+    pendingSaveRef.current = null;
+
+    const prepared = prepareSettingsForSave(
+      nextQueued.values,
+      catalogHomeDirRef.current,
+    );
+    if (!prepared) {
+      for (const resolve of nextQueued.resolvers) resolve(false);
+      if (mountedRef.current) setAutoSaving(false);
+      return;
+    }
+
+    inFlightRef.current = true;
+    if (mountedRef.current) {
+      setAutoSaving(true);
+      setLocalSaveError(null);
+    }
+
+    const revBefore = settingsRef.current.revision;
+    const ok = await settingsRef.current.save(prepared, revBefore);
+    inFlightRef.current = false;
+
+    if (ok) {
+      for (const resolve of nextQueued.resolvers) resolve(true);
+      if (peekPendingSave() !== null) {
+        if (settingsRef.current.revision !== revBefore) {
+          void flushQueue();
+        } else {
+          awaitingRevisionFromRef.current = revBefore;
+          clearRevisionFallbackTimer();
+          revisionFallbackTimerRef.current = setTimeout(() => {
+            revisionFallbackTimerRef.current = null;
+            if (awaitingRevisionFromRef.current === revBefore) {
+              awaitingRevisionFromRef.current = null;
+              void flushQueue();
+            }
+          }, REVISION_WAIT_FALLBACK_MS);
+        }
+      } else if (mountedRef.current) {
+        setAutoSaving(false);
+      }
+      return;
+    }
+
+    const errMsg = settingsRef.current.saveError ?? t("settings.loadError");
+    if (mountedRef.current) {
+      setLocalSaveError(errMsg);
+      toast.error(t("settings.saveFailedToast", { error: errMsg }));
+      setAutoSaving(false);
+    }
+    for (const resolve of nextQueued.resolvers) resolve(false);
+    const dropped = peekPendingSave();
+    if (dropped !== null) {
+      pendingSaveRef.current = null;
+      for (const resolve of dropped.resolvers) resolve(false);
+    }
+    void settingsRef.current.reload();
+  }, [clearRevisionFallbackTimer, peekPendingSave, toast, t]);
+
+  const enqueueSave = useCallback(
+    (values: TeamSettingsValues): AsyncBool =>
+      new Promise<Bool>((resolve) => {
+        const existingResolvers = pendingSaveRef.current?.resolvers ?? [];
+        pendingSaveRef.current = {
+          values,
+          resolvers: [...existingResolvers, resolve],
+        };
+        if (mountedRef.current) setAutoSaving(true);
+        void flushQueue();
+      }),
+    [flushQueue],
   );
 
   useEffect(() => {
-    if (settings.revision === draftRevision) return;
-    if (ownImmediateSavePendingRef.current) {
-      ownImmediateSavePendingRef.current = false;
-      setDraftRevision(settings.revision);
-      return;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearRevisionFallbackTimer();
+      if (debounceTimerRef.current !== null) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+        void enqueueSave(localValuesRef.current);
+      }
+    };
+  }, [clearRevisionFallbackTimer, enqueueSave]);
+
+  useEffect(() => {
+    if (settings.revision === lastSyncedRevisionRef.current) return;
+    lastSyncedRevisionRef.current = settings.revision;
+
+    if (awaitingRevisionFromRef.current !== null) {
+      awaitingRevisionFromRef.current = null;
+      clearRevisionFallbackTimer();
+      if (pendingSaveRef.current !== null) {
+        void flushQueue();
+        return;
+      }
     }
-    if (!isDraftDirty) {
-      const next = buildDraft(settings.values);
-      setDraft(next);
-      setDraftRevision(settings.revision);
+
+    if (
+      !inFlightRef.current &&
+      pendingSaveRef.current === null &&
+      debounceTimerRef.current === null
+    ) {
+      const synced = cloneSettingsValues(settings.values);
+      localValuesRef.current = synced;
+      setLocalValues(synced);
       setSelectedPresetId((current) =>
-        next.presets.some((item) => item.id === current)
+        synced.presets.some((item) => item.id === current)
           ? current
-          : next.defaultPresetId || next.presets[0]?.id || "",
+          : synced.defaultPresetId || synced.presets[0]?.id || "",
       );
     }
-  }, [isDraftDirty, settings.revision, settings.values, draftRevision]);
+  }, [settings.revision, settings.values, clearRevisionFallbackTimer, flushQueue]);
 
   const activePreset = useMemo(
     () =>
-      draft.presets.find((item) => item.id === selectedPresetId) ??
-      draft.presets[0],
-    [draft.presets, selectedPresetId],
+      localValues.presets.find((item) => item.id === selectedPresetId) ??
+      localValues.presets[0],
+    [localValues.presets, selectedPresetId],
   );
 
   useEffect(() => {
@@ -168,6 +328,59 @@ function ReadyTeamSettingsContent({
       setSelectedPresetId(activePreset.id);
     }
   }, [activePreset, selectedPresetId]);
+
+  const hasEmptyPresetName = useMemo(
+    () => localValues.presets.some((item) => item.name.trim() === ""),
+    [localValues.presets],
+  );
+
+  const activePresetNameEmpty = Boolean(
+    activePreset && activePreset.name.trim() === "",
+  );
+
+  const commitImmediate = useCallback(
+    async (
+      updater: (current: TeamSettingsValues) => TeamSettingsValues,
+    ): AsyncBool => {
+      clearDebounceTimer();
+      const next = updater(localValuesRef.current);
+      localValuesRef.current = next;
+      setLocalValues(next);
+      if (next.presets.some((item) => item.name.trim() === "")) {
+        toast.error(t("settings.presets.nameEmptyError"));
+        return false;
+      }
+      return enqueueSave(next);
+    },
+    [clearDebounceTimer, enqueueSave, toast, t],
+  );
+
+  const updateTextField = useCallback(
+    (updater: (current: TeamSettingsValues) => TeamSettingsValues) => {
+      const next = updater(localValuesRef.current);
+      localValuesRef.current = next;
+      setLocalValues(next);
+      clearDebounceTimer();
+      if (next.presets.some((item) => item.name.trim() === "")) {
+        return;
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        debounceTimerRef.current = null;
+        void enqueueSave(localValuesRef.current);
+      }, TEXT_AUTOSAVE_DEBOUNCE_MS);
+    },
+    [clearDebounceTimer, enqueueSave],
+  );
+
+  const flushTextOnBlur = useCallback(() => {
+    if (debounceTimerRef.current === null) return;
+    clearDebounceTimer();
+    const current = localValuesRef.current;
+    if (current.presets.some((item) => item.name.trim() === "")) {
+      return;
+    }
+    void enqueueSave(current);
+  }, [clearDebounceTimer, enqueueSave]);
 
   const loadCatalog = useCallback(
     async (refresh = false) => {
@@ -216,207 +429,169 @@ function ReadyTeamSettingsContent({
       });
   }, [previewExpanded, activePreset, fetchPromptPreview]);
 
-  const saveImmediate = useCallback(
-    async (patch: Partial<TeamSettingsValues>) => {
-      const nextValues: TeamSettingsValues = {
-        ...settings.values,
-        ...patch,
-      };
-      ownImmediateSavePendingRef.current = true;
-      const ok = await settings.save(nextValues, settings.revision);
-      if (!ok) {
-        ownImmediateSavePendingRef.current = false;
-        if (settings.saveError) {
-          toast.error(t("settings.saveFailedToast", { error: settings.saveError }));
-        }
-      }
-    },
-    [settings, toast, t],
-  );
-
-  const handleSaveDraft = useCallback(async () => {
-    const emptyNamePreset = draft.presets.find((item) => item.name.trim() === "");
-    if (emptyNamePreset) {
-      setSelectedPresetId(emptyNamePreset.id);
-      toast.error(t("settings.presets.nameEmptyError"));
-      return;
-    }
-
-    const normalizedDirs = normalizeExcludedDirectories(
-      draft.excludedDirectories,
-      catalog?.homeDir,
-    );
-    const validDefault = draft.presets.some(
-      (item) => item.id === draft.defaultPresetId,
-    )
-      ? draft.defaultPresetId
-      : draft.presets[0].id;
-    const nextValues: TeamSettingsValues = {
-      ...settings.values,
-      excludedDirectories: normalizedDirs,
-      defaultPresetId: validDefault,
-      presets: draft.presets.map((preset) => ({
-        ...preset,
-        name: preset.name.trim(),
-      })),
-    };
-    const ok = await settings.save(nextValues, draftRevision);
-    if (ok) {
-      toast.show(t("settings.savedToast"), { variant: "success" });
-    } else if (settings.saveError) {
-      toast.error(t("settings.saveFailedToast", { error: settings.saveError }));
-    }
-  }, [draft, draftRevision, catalog?.homeDir, settings, toast, t]);
-
-  const handleDiscardDraft = useCallback(() => {
-    const reset = buildDraft(settings.values);
-    setDraft(reset);
-    setDraftRevision(settings.revision);
-    setSelectedPresetId(reset.defaultPresetId || reset.presets[0]?.id || "");
-    toast.show(t("settings.discardedToast"), { variant: "info" });
-  }, [settings.values, settings.revision, toast, t]);
-
   const handleResetDefaults = useCallback(async () => {
+    clearDebounceTimer();
+    clearRevisionFallbackTimer();
+    awaitingRevisionFromRef.current = null;
+    if (pendingSaveRef.current) {
+      const dropped = pendingSaveRef.current;
+      pendingSaveRef.current = null;
+      for (const resolve of dropped.resolvers) resolve(false);
+    }
+    setLocalSaveError(null);
     const ok = await settings.reset();
     if (ok) {
       toast.show(t("settings.resetSuccessToast"), { variant: "success" });
     } else if (settings.saveError) {
       toast.error(t("settings.saveFailedToast", { error: settings.saveError }));
     }
-  }, [settings, toast, t]);
+  }, [clearDebounceTimer, clearRevisionFallbackTimer, settings, toast, t]);
 
   const handleAddExcludedDir = useCallback(
-    (rawPath: Str) => {
+    async (rawPath: Str) => {
       const trimmed = rawPath.trim();
       if (!trimmed) return;
-      if (hasExcludedDirectory(draft.excludedDirectories, trimmed, catalog?.homeDir)) {
+      if (
+        hasExcludedDirectory(
+          localValuesRef.current.excludedDirectories,
+          trimmed,
+          catalogHomeDirRef.current,
+        )
+      ) {
         toast.show(t("settings.excludedDirs.alreadyExcludedToast"), {
           variant: "info",
         });
         return;
       }
-      setDraft((current) => ({
+      const ok = await commitImmediate((current) => ({
         ...current,
         excludedDirectories: addExcludedDirectory(
           current.excludedDirectories,
           trimmed,
-          catalog?.homeDir,
+          catalogHomeDirRef.current,
         ),
       }));
-      if (rawPath === newDirInput) {
-        setNewDirInput("");
+      if (ok) {
+        if (rawPath === newDirInput) {
+          setNewDirInput("");
+        }
+        toast.show(t("settings.excludedDirs.addedToast", { dir: trimmed }), {
+          variant: "success",
+        });
       }
-      toast.show(t("settings.excludedDirs.addedToast", { dir: trimmed }), {
-        variant: "info",
-      });
     },
-    [draft.excludedDirectories, catalog?.homeDir, newDirInput, toast, t],
+    [commitImmediate, newDirInput, toast, t],
   );
 
   const handleRemoveExcludedDir = useCallback(
-    (dir: Str) => {
-      setDraft((current) => ({
+    async (dir: Str) => {
+      await commitImmediate((current) => ({
         ...current,
         excludedDirectories: removeExcludedDirectory(
           current.excludedDirectories,
           dir,
-          catalog?.homeDir,
+          catalogHomeDirRef.current,
         ),
       }));
     },
-    [catalog?.homeDir],
+    [commitImmediate],
   );
 
-  const handleCreatePreset = useCallback(() => {
+  const handleCreatePreset = useCallback(async () => {
     const { presets, created } = createNewPreset(
-      draft.presets,
+      localValuesRef.current.presets,
       t("settings.presets.newPresetBaseName"),
     );
-    setDraft((current) => ({ ...current, presets }));
-    setSelectedPresetId(created.id);
-    toast.show(t("settings.presets.createdToast", { name: created.name }), {
-      variant: "info",
-    });
-  }, [draft.presets, toast, t]);
+    const ok = await commitImmediate((current) => ({ ...current, presets }));
+    if (ok) {
+      setSelectedPresetId(created.id);
+      toast.show(t("settings.presets.createdToast", { name: created.name }), {
+        variant: "success",
+      });
+    }
+  }, [commitImmediate, toast, t]);
 
-  const handleDuplicatePreset = useCallback(() => {
+  const handleDuplicatePreset = useCallback(async () => {
     if (!activePreset) return;
     const duplicated = duplicatePreset(
-      draft.presets,
+      localValuesRef.current.presets,
       activePreset.id,
       t("settings.presets.duplicateSuffix"),
     );
     if (!duplicated) return;
-    setDraft((current) => ({ ...current, presets: duplicated.presets }));
-    setSelectedPresetId(duplicated.created.id);
-    toast.show(
-      t("settings.presets.duplicatedToast", { name: duplicated.created.name }),
-      { variant: "info" },
-    );
-  }, [activePreset, draft.presets, toast, t]);
+    const ok = await commitImmediate((current) => ({
+      ...current,
+      presets: duplicated.presets,
+    }));
+    if (ok) {
+      setSelectedPresetId(duplicated.created.id);
+      toast.show(
+        t("settings.presets.duplicatedToast", { name: duplicated.created.name }),
+        { variant: "success" },
+      );
+    }
+  }, [activePreset, commitImmediate, toast, t]);
 
-  const handleDeletePreset = useCallback(() => {
+  const handleDeletePreset = useCallback(async () => {
     if (!activePreset) return;
-    if (draft.presets.length <= 1) {
+    if (localValuesRef.current.presets.length <= 1) {
       toast.show(t("settings.presets.cannotDeleteLastToast"), {
         variant: "warning",
       });
       return;
     }
     const deletedName = activePreset.name;
-    const nextSettings = deletePreset(
-      { ...settings.values, ...draft },
-      activePreset.id,
-    );
-    setDraft((current) => ({
-      ...current,
-      presets: nextSettings.presets,
-      defaultPresetId: nextSettings.defaultPresetId,
-    }));
-    setSelectedPresetId(nextSettings.defaultPresetId);
-    toast.show(t("settings.presets.deletedToast", { name: deletedName }), {
-      variant: "info",
-    });
-  }, [activePreset, draft, settings.values, toast, t]);
+    const nextSettings = deletePreset(localValuesRef.current, activePreset.id);
+    const ok = await commitImmediate(() => nextSettings);
+    if (ok) {
+      setSelectedPresetId(nextSettings.defaultPresetId);
+      toast.show(t("settings.presets.deletedToast", { name: deletedName }), {
+        variant: "success",
+      });
+    }
+  }, [activePreset, commitImmediate, toast, t]);
 
-  const handleSetDefaultPreset = useCallback(() => {
+  const handleSetDefaultPreset = useCallback(async () => {
     if (!activePreset) return;
-    setDraft((current) => ({
+    await commitImmediate((current) => ({
       ...current,
       defaultPresetId: activePreset.id,
     }));
-  }, [activePreset]);
-
-  const patchActivePreset = useCallback(
-    (patch: Partial<TeamPreset>) => {
-      if (!activePreset) return;
-      setDraft((current) => ({
-        ...current,
-        presets: updatePreset(current.presets, activePreset.id, patch),
-      }));
-    },
-    [activePreset],
-  );
+  }, [activePreset, commitImmediate]);
 
   const handleSaveMember = useCallback(
-    (member: TeamMember) => {
-      if (!activePreset) return;
-      setDraft((current) => ({
+    async (member: TeamMember): AsyncBool => {
+      if (!activePreset) return false;
+      if (localValuesRef.current.presets.some((item) => item.name.trim() === "")) {
+        toast.error(t("settings.presets.nameEmptyError"));
+        return false;
+      }
+      const previous = localValuesRef.current;
+      const ok = await commitImmediate((current) => ({
         ...current,
         presets: current.presets.map((preset) =>
           preset.id === activePreset.id ? upsertMember(preset, member) : preset,
         ),
       }));
-      setMemberModalOpen(false);
-      setEditingMember(null);
+      if (ok) {
+        setMemberModalOpen(false);
+        setEditingMember(null);
+        toast.show(t("settings.members.savedToast", { name: member.name }), {
+          variant: "success",
+        });
+        return true;
+      }
+      localValuesRef.current = previous;
+      setLocalValues(previous);
+      return false;
     },
-    [activePreset],
+    [activePreset, commitImmediate, toast, t],
   );
 
   const handleToggleMember = useCallback(
-    (memberId: Str, enabled: Bool) => {
+    async (memberId: Str, enabled: Bool) => {
       if (!activePreset) return;
-      setDraft((current) => ({
+      await commitImmediate((current) => ({
         ...current,
         presets: current.presets.map((preset) =>
           preset.id === activePreset.id
@@ -425,13 +600,13 @@ function ReadyTeamSettingsContent({
         ),
       }));
     },
-    [activePreset],
+    [activePreset, commitImmediate],
   );
 
   const handleDeleteMember = useCallback(
-    (member: TeamMember) => {
+    async (member: TeamMember) => {
       if (!activePreset) return;
-      setDraft((current) => ({
+      const ok = await commitImmediate((current) => ({
         ...current,
         presets: current.presets.map((preset) =>
           preset.id === activePreset.id
@@ -439,11 +614,13 @@ function ReadyTeamSettingsContent({
             : preset,
         ),
       }));
-      toast.show(t("settings.members.removedToast", { name: member.name }), {
-        variant: "info",
-      });
+      if (ok) {
+        toast.show(t("settings.members.removedToast", { name: member.name }), {
+          variant: "success",
+        });
+      }
     },
-    [activePreset, toast, t],
+    [activePreset, commitImmediate, toast, t],
   );
 
   const handleCopyPreview = useCallback(async () => {
@@ -459,24 +636,24 @@ function ReadyTeamSettingsContent({
 
   const presetOptions = useMemo(
     () =>
-      draft.presets.map((preset) => ({
+      localValues.presets.map((preset) => ({
         value: preset.id,
         label:
-          preset.id === draft.defaultPresetId
+          preset.id === localValues.defaultPresetId
             ? `${preset.name} ${t("settings.presets.defaultTag")}`
             : preset.name,
       })),
-    [draft.presets, draft.defaultPresetId, t],
+    [localValues.presets, localValues.defaultPresetId, t],
   );
 
   const downloadsExcluded = useMemo(
     () =>
       hasExcludedDirectory(
-        draft.excludedDirectories,
+        localValues.excludedDirectories,
         "~/Downloads",
         catalog?.homeDir,
       ),
-    [draft.excludedDirectories, catalog?.homeDir],
+    [localValues.excludedDirectories, catalog?.homeDir],
   );
 
   const styles = useMemo(
@@ -751,35 +928,42 @@ function ReadyTeamSettingsContent({
           <SettingsSwitch
             label={t("settings.general.enabledLabel")}
             hint={t("settings.general.enabledHint")}
-            value={settings.values.enabled}
-            disabled={settings.saving}
-            onValueChange={(enabled) => void saveImmediate({ enabled })}
+            value={localValues.enabled}
+            onValueChange={(enabled) =>
+              void commitImmediate((current) => ({ ...current, enabled }))
+            }
           />
           <SettingsSwitch
             label={t("settings.general.autoApplyLabel")}
             hint={t("settings.general.autoApplyHint")}
-            value={settings.values.autoApplyToNewTopLevelAgents}
-            disabled={settings.saving}
+            value={localValues.autoApplyToNewTopLevelAgents}
             onValueChange={(autoApplyToNewTopLevelAgents) =>
-              void saveImmediate({ autoApplyToNewTopLevelAgents })
+              void commitImmediate((current) => ({
+                ...current,
+                autoApplyToNewTopLevelAgents,
+              }))
             }
           />
           <SettingsSwitch
             label={t("settings.general.showComposerLabel")}
             hint={t("settings.general.showComposerHint")}
-            value={settings.values.showComposerControl}
-            disabled={settings.saving}
+            value={localValues.showComposerControl}
             onValueChange={(showComposerControl) =>
-              void saveImmediate({ showComposerControl })
+              void commitImmediate((current) => ({
+                ...current,
+                showComposerControl,
+              }))
             }
           />
           <SettingsSwitch
             label={t("settings.general.enforceDefaultsLabel")}
             hint={t("settings.general.enforceDefaultsHint")}
-            value={settings.values.enforceMemberDefaultsOnCreate}
-            disabled={settings.saving}
+            value={localValues.enforceMemberDefaultsOnCreate}
             onValueChange={(enforceMemberDefaultsOnCreate) =>
-              void saveImmediate({ enforceMemberDefaultsOnCreate })
+              void commitImmediate((current) => ({
+                ...current,
+                enforceMemberDefaultsOnCreate,
+              }))
             }
           />
         </SettingsCard>
@@ -797,13 +981,13 @@ function ReadyTeamSettingsContent({
                 {t("settings.excludedDirs.listHint")}
               </Text>
             </View>
-            {draft.excludedDirectories.length === 0 ? (
+            {localValues.excludedDirectories.length === 0 ? (
               <Text style={styles.mutedText}>
                 {t("settings.excludedDirs.empty")}
               </Text>
             ) : (
               <View style={styles.dirList}>
-                {draft.excludedDirectories.map((dir) => (
+                {localValues.excludedDirectories.map((dir) => (
                   <View key={dir} style={styles.dirRow}>
                     <View style={styles.dirLeft}>
                       <Icon
@@ -815,7 +999,7 @@ function ReadyTeamSettingsContent({
                     </View>
                     <Pressable
                       accessibilityRole="button"
-                      onPress={() => handleRemoveExcludedDir(dir)}
+                      onPress={() => void handleRemoveExcludedDir(dir)}
                       style={styles.chipBtn}
                     >
                       <Icon
@@ -851,12 +1035,12 @@ function ReadyTeamSettingsContent({
                 autoCorrect={false}
                 style={[styles.textInput, styles.flexInput]}
                 onChangeText={setNewDirInput}
-                onSubmitEditing={() => handleAddExcludedDir(newDirInput)}
+                onSubmitEditing={() => void handleAddExcludedDir(newDirInput)}
               />
               <Pressable
                 accessibilityRole="button"
                 disabled={!newDirInput.trim()}
-                onPress={() => handleAddExcludedDir(newDirInput)}
+                onPress={() => void handleAddExcludedDir(newDirInput)}
                 style={[
                   styles.chipBtn,
                   styles.chipBtnPrimary,
@@ -890,7 +1074,7 @@ function ReadyTeamSettingsContent({
                 : t("settings.excludedDirs.quickDownloadsAction")
             }
             disabled={downloadsExcluded}
-            onPress={() => handleAddExcludedDir("~/Downloads")}
+            onPress={() => void handleAddExcludedDir("~/Downloads")}
           />
         </SettingsCard>
       </SettingsSection>
@@ -911,7 +1095,7 @@ function ReadyTeamSettingsContent({
               <Text style={styles.fieldLabel}>{activePreset.name}</Text>
             ) : null}
             <View style={styles.actionRow}>
-              {activePreset?.id === draft.defaultPresetId ? (
+              {activePreset?.id === localValues.defaultPresetId ? (
                 <View style={styles.successBadge}>
                   <Text style={styles.successBadgeText}>
                     {t("settings.presets.isDefaultBadge")}
@@ -920,7 +1104,7 @@ function ReadyTeamSettingsContent({
               ) : (
                 <Pressable
                   accessibilityRole="button"
-                  onPress={handleSetDefaultPreset}
+                  onPress={() => void handleSetDefaultPreset()}
                   style={[styles.chipBtn, styles.chipBtnPrimary]}
                 >
                   <Icon
@@ -936,7 +1120,7 @@ function ReadyTeamSettingsContent({
 
               <Pressable
                 accessibilityRole="button"
-                onPress={handleCreatePreset}
+                onPress={() => void handleCreatePreset()}
                 style={styles.chipBtn}
               >
                 <Icon name="Plus" size={13} color={theme.colors.foreground} />
@@ -947,7 +1131,7 @@ function ReadyTeamSettingsContent({
 
               <Pressable
                 accessibilityRole="button"
-                onPress={handleDuplicatePreset}
+                onPress={() => void handleDuplicatePreset()}
                 style={styles.chipBtn}
               >
                 <Icon name="Copy" size={13} color={theme.colors.foreground} />
@@ -958,12 +1142,12 @@ function ReadyTeamSettingsContent({
 
               <Pressable
                 accessibilityRole="button"
-                disabled={draft.presets.length <= 1}
-                onPress={handleDeletePreset}
+                disabled={localValues.presets.length <= 1}
+                onPress={() => void handleDeletePreset()}
                 style={[
                   styles.chipBtn,
                   styles.chipBtnDanger,
-                  draft.presets.length <= 1 ? styles.chipBtnDisabled : null,
+                  localValues.presets.length <= 1 ? styles.chipBtnDisabled : null,
                 ]}
               >
                 <Icon
@@ -989,8 +1173,21 @@ function ReadyTeamSettingsContent({
                   placeholder={t("settings.presets.namePlaceholder")}
                   placeholderTextColor={theme.colors.foregroundMuted}
                   style={[styles.textInput, styles.fullWidthInput]}
-                  onChangeText={(name) => patchActivePreset({ name })}
+                  onChangeText={(name) =>
+                    updateTextField((current) => ({
+                      ...current,
+                      presets: updatePreset(current.presets, activePreset.id, {
+                        name,
+                      }),
+                    }))
+                  }
+                  onBlur={flushTextOnBlur}
                 />
+                {activePresetNameEmpty ? (
+                  <Text accessibilityRole="alert" style={styles.errorText}>
+                    {t("settings.presets.nameEmptyError")}
+                  </Text>
+                ) : null}
               </View>
 
               <View style={styles.fieldBlock}>
@@ -1005,8 +1202,14 @@ function ReadyTeamSettingsContent({
                   numberOfLines={3}
                   style={[styles.textInput, styles.descriptionInput]}
                   onChangeText={(description) =>
-                    patchActivePreset({ description })
+                    updateTextField((current) => ({
+                      ...current,
+                      presets: updatePreset(current.presets, activePreset.id, {
+                        description,
+                      }),
+                    }))
                   }
+                  onBlur={flushTextOnBlur}
                 />
               </View>
 
@@ -1015,7 +1218,12 @@ function ReadyTeamSettingsContent({
                 hint={t("settings.presets.noDirectEditHint")}
                 value={activePreset.commanderNoDirectEdit}
                 onValueChange={(commanderNoDirectEdit) =>
-                  patchActivePreset({ commanderNoDirectEdit })
+                  void commitImmediate((current) => ({
+                    ...current,
+                    presets: updatePreset(current.presets, activePreset.id, {
+                      commanderNoDirectEdit,
+                    }),
+                  }))
                 }
               />
 
@@ -1036,8 +1244,14 @@ function ReadyTeamSettingsContent({
                   numberOfLines={4}
                   style={[styles.textInput, styles.extraInstructionsInput]}
                   onChangeText={(commanderExtraInstructions) =>
-                    patchActivePreset({ commanderExtraInstructions })
+                    updateTextField((current) => ({
+                      ...current,
+                      presets: updatePreset(current.presets, activePreset.id, {
+                        commanderExtraInstructions,
+                      }),
+                    }))
                   }
+                  onBlur={flushTextOnBlur}
                 />
               </View>
             </>
@@ -1104,7 +1318,7 @@ function ReadyTeamSettingsContent({
                           name: member.name,
                         })}
                         onPress={() =>
-                          handleToggleMember(member.id, !member.enabled)
+                          void handleToggleMember(member.id, !member.enabled)
                         }
                         style={styles.chipBtn}
                       >
@@ -1135,7 +1349,7 @@ function ReadyTeamSettingsContent({
 
                       <Pressable
                         accessibilityRole="button"
-                        onPress={() => handleDeleteMember(member)}
+                        onPress={() => void handleDeleteMember(member)}
                         style={[styles.chipBtn, styles.chipBtnDanger]}
                       >
                         <Icon
@@ -1242,46 +1456,37 @@ function ReadyTeamSettingsContent({
         </SettingsCard>
       </SettingsSection>
 
-      {/* Section 6: Save / Discard / Reset */}
+      {/* Section 6: Auto-save Status & Reset */}
       <SettingsSection title={t("settings.sections.actions")}>
         <SettingsCard>
-          {isDraftDirty ? (
-            <SettingsRow label={t("settings.actions.unsavedHint")}>
+          <SettingsRow label={t("settings.actions.autoSaveLabel")}>
+            {hasEmptyPresetName ? (
               <Text style={styles.warningText}>
-                {t("settings.actions.saveHint")}
+                {t("settings.actions.autoSavePausedEmptyName")}
               </Text>
-            </SettingsRow>
-          ) : null}
-
-          <SettingsAction
-            label={t("settings.actions.saveLabel")}
-            hint={t("settings.actions.saveHint")}
-            actionLabel={t("settings.actions.saveAction")}
-            disabled={settings.saving || !isDraftDirty}
-            onPress={() => void handleSaveDraft()}
-          />
-
-          {isDraftDirty ? (
-            <SettingsAction
-              label={t("settings.actions.discardLabel")}
-              actionLabel={t("settings.actions.discardAction")}
-              disabled={settings.saving}
-              onPress={handleDiscardDraft}
-            />
-          ) : null}
+            ) : autoSaving || settings.saving ? (
+              <Text style={styles.mutedText}>
+                {t("settings.actions.autoSaveSaving")}
+              </Text>
+            ) : (
+              <Text style={styles.mutedText}>
+                {t("settings.actions.autoSaveIdle")}
+              </Text>
+            )}
+          </SettingsRow>
 
           <SettingsAction
             label={t("settings.resetLabel")}
             hint={t("settings.resetHint")}
             actionLabel={t("settings.resetAction")}
-            disabled={settings.saving}
+            disabled={settings.saving || autoSaving}
             onPress={() => void handleResetDefaults()}
           />
         </SettingsCard>
 
-        {settings.saveError ? (
+        {localSaveError || settings.saveError ? (
           <Text accessibilityRole="alert" style={styles.errorText}>
-            {settings.saveError}
+            {localSaveError ?? settings.saveError}
           </Text>
         ) : null}
       </SettingsSection>
@@ -1304,7 +1509,7 @@ function ReadyTeamSettingsContent({
 }
 
 export function TeamSettingsScreen({ theme, layout }: PluginSurfaceProps) {
-  const { t, locale } = useTranslation(messages);
+  const { t } = useTranslation(messages);
   const settings = useSettings(teamSettings);
 
   const styles = useMemo(

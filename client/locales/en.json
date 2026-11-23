@@ -11,18 +11,17 @@
     "resetSuccessToast": "Default team settings restored",
     "savedToast": "Team settings saved",
     "saveFailedToast": "Failed to save settings: {{error}}",
-    "discardedToast": "Unsaved changes discarded",
     "sections": {
       "general": "General",
       "excludedDirs": "Excluded Directories",
       "presets": "Team Presets",
       "members": "Team Members",
       "preview": "Commander Prompt Preview",
-      "actions": "Save & Reset"
+      "actions": "Status & Reset"
     },
     "general": {
       "enabledLabel": "Enable Team Manager",
-      "enabledHint": "Master switch for injecting team orchestration prompts and the roster tool.",
+      "enabledHint": "Master switch. When off, commander prompt and team_get_roster injection stop immediately across all sessions and workspaces.",
       "autoApplyLabel": "Auto-enable for new top-level sessions",
       "autoApplyHint": "Automatically equip new top-level sessions as commanders unless overridden or excluded.",
       "showComposerLabel": "Show composer team selector",
@@ -88,6 +87,7 @@
       "enabledBadge": "Enabled",
       "optionalBadge": "Optional",
       "toggleA11y": "Toggle role {{name}}",
+      "savedToast": "Saved role: {{name}}",
       "removedToast": "Removed role: {{name}}"
     },
     "preview": {
@@ -100,12 +100,10 @@
       "fallbackHint": "Showing local preview."
     },
     "actions": {
-      "saveLabel": "Save configuration changes",
-      "saveHint": "Persist excluded directories, team presets, and member edits.",
-      "saveAction": "Save changes",
-      "discardLabel": "Discard unsaved edits",
-      "discardAction": "Discard",
-      "unsavedHint": "You have unsaved changes."
+      "autoSaveLabel": "Auto-save",
+      "autoSaveIdle": "All changes save automatically.",
+      "autoSaveSaving": "Saving changes…",
+      "autoSavePausedEmptyName": "Auto-save paused: preset name cannot be empty."
     }
   },
   "memberModal": {
@@ -140,7 +138,8 @@
     "responsibilitiesPlaceholder": "Summarize what this role owns.",
     "rolePromptLabel": "Role-specific instructions",
     "rolePromptPlaceholder": "Additional rules injected when this role subagent opens…",
-    "saveAction": "Apply role",
+    "saveAction": "Save role",
+    "savingAction": "Saving…",
     "cancelAction": "Cancel"
   },
   "composer": {

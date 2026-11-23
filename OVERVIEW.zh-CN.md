@@ -4,10 +4,10 @@ Paseo 团队管理（Paseo Team Manager）为 Paseo 顶层对话自动注入团�
 
 当智能体会话打开时，插件在 `agent.open.before` 钩子中检查会话标签与元数据，自动跳过历史回放（`purpose === "history"`）与后台辅助会话（`background === true`）：
 
-- 顶层会话（不含 `paseo.parent-agent-id` 标签）按以下优先级判定是否启用指挥模式：单会话元数据覆盖 > 工作区或目录覆盖 > 排除目录规则 > 全局默认开关。启用时，插件向该会话追加结构化指挥系统指令，并挂载只读工具 `team_get_roster`。
+- 顶层会话（不含 `paseo.parent-agent-id` 标签）按以下优先级判定是否启用指挥模式：全局 `enabled` 总开关为最高优先级总闸（关闭时即便是已有单会话或工作区覆盖也会停止注入指挥指令与 `team_get_roster`），其后依次为单会话元数据覆盖 > 工作区或目录覆盖 > 排除目录规则 > 新会话自动启用开关。启用时，插件向该会话追加结构化指挥系统指令，并挂载只读工具 `team_get_roster`。
 - 角色子智能体（含 `paseo.parent-agent-id` 且带 `paseo-team-manager.role` 标签或元数据）不会收到指挥指令，仅追加对应角色的专属职责与回报规范。
 
-指挥始终通过 Paseo 原生 MCP 工具 `create_agent` 与 `send_agent_prompt` 调度子智能体，从而完整保留 Paseo 内置的 Subagents 轨道、`notifyOnFinish` 完成自动唤醒与消息队列机制。开启参数兜底后，插件还会通过 `agent.create.before` 钩子为新建角色子智能体补齐未显式传入的模型、会话模式、思考深度与 Provider 特性选项。
+指挥始终通过 Paseo 原生 MCP 工具 `create_agent` 与 `send_agent_prompt` 调度子智能体，从而完整保留 Paseo 内置的 Subagents 轨道、`notifyOnFinish` 完成自动唤醒与消息队列机制。开启参数兜底后，`agent.create.before` 钩子仅在团队模式已启用的作用域内、且会话显式通过 `paseo-team-manager.role` 元数据指定角色时，才补齐未传入的模型、会话模式、思考深度与 Provider 特性选项，不会改动普通未指派会话的配置与权限模式。
 
 ## 配置与环境要求
 
@@ -19,7 +19,7 @@ Paseo 团队管理（Paseo Team Manager）为 Paseo 顶层对话自动注入团�
 
 - `backend`（默认启用）：`codex/auto/gpt-6.2-sol`，思考深度 `xhigh`，模式 `full-access`，`service_tier: "default"`。
 - `frontend`（默认启用）：`antigravity/gemini-4-neon`，思考深度 `high`，模式 `full-access`。
-- `reviewer`（可选）：`codex/auto/gpt-6.2-astra`，思考深度 `xhigh`，模式 `auto`，`service_tier: "default"`。
+- `reviewer`（可选）：`codex/auto/gpt-6.2-sol`，思考深度 `xhigh`，模式 `auto`，`service_tier: "default"`。
 - `qa`（可选）：`codex/auto/gpt-6.2-sol`，思考深度 `xhigh`，模式 `full-access`，`service_tier: "default"`。
 - `explorer`（可选）：`antigravity/gemini-4-hydrogen`，思考深度 `medium`，模式 `plan`。
 

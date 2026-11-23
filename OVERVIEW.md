@@ -4,10 +4,10 @@ Paseo Team Manager equips top-level Paseo sessions with team commander instructi
 
 When an agent session opens, Paseo Team Manager inspects its labels and metadata in the `agent.open.before` hook. History loads and background helper agents are skipped.
 
-- Top-level sessions (agents without the `paseo.parent-agent-id` label) are evaluated as commanders according to priority: per-session metadata override, workspace or directory override, excluded directory rules, and finally the global settings. When active, the plugin appends structured commander instructions and attaches the read-only `team_get_roster` tool.
+- Top-level sessions (agents without the `paseo.parent-agent-id` label) are evaluated as commanders according to priority: the global `enabled` toggle acts as the top-level master switch (when off, commander prompt and `team_get_roster` injection stop across all sessions and workspaces, even if a session or workspace override exists), followed by per-session metadata override, workspace or directory override, excluded directory rules, and finally the auto-apply global default. When active, the plugin appends structured commander instructions and attaches the read-only `team_get_roster` tool.
 - Role subagents (agents carrying `paseo.parent-agent-id` plus a `paseo-team-manager.role` label or metadata role) receive only their role-specific instructions instead of commander instructions.
 
-Commanders delegate work through Paseo's native `create_agent` and `send_agent_prompt` MCP tools rather than custom wrapper tools. This preserves Paseo's built-in Subagents track, `notifyOnFinish` completion wakeups, and message queueing. When `enforceMemberDefaultsOnCreate` is enabled, the `agent.create.before` hook also fills in any omitted model, session mode, thinking level, or provider options configured for that role.
+Commanders delegate work through Paseo's native `create_agent` and `send_agent_prompt` MCP tools rather than custom wrapper tools. This preserves Paseo's built-in Subagents track, `notifyOnFinish` completion wakeups, and message queueing. When `enforceMemberDefaultsOnCreate` is enabled and team mode is active for that scope, the `agent.create.before` hook fills in omitted model, session mode, thinking level, or provider options only for sessions that explicitly declare a role via `paseo-team-manager.role` metadata, leaving ordinary unassigned sessions and their permission modes unchanged.
 
 ## Setup and requirements
 
@@ -19,7 +19,7 @@ The built-in full-stack preset includes two enabled core roles and three optiona
 
 - `backend` (enabled): `codex/auto/gpt-6.2-sol`, thinking `xhigh`, mode `full-access`, `service_tier: "default"`.
 - `frontend` (enabled): `antigravity/gemini-4-neon`, thinking `high`, mode `full-access`.
-- `reviewer` (optional): `codex/auto/gpt-6.2-astra`, thinking `xhigh`, mode `auto`, `service_tier: "default"`.
+- `reviewer` (optional): `codex/auto/gpt-6.2-sol`, thinking `xhigh`, mode `auto`, `service_tier: "default"`.
 - `qa` (optional): `codex/auto/gpt-6.2-sol`, thinking `xhigh`, mode `full-access`, `service_tier: "default"`.
 - `explorer` (optional): `antigravity/gemini-4-hydrogen`, thinking `medium`, mode `plan`.
 
