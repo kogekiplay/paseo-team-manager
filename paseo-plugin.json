@@ -1,0 +1,15 @@
+{
+  "id": "paseo-team-manager",
+  "name": "Paseo Team Manager",
+  "description": "Automatically equips top-level Paseo commander sessions with team roster instructions, role-based subagent presets, and composer/settings controls.",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.17.1"
+  },
+  "translations": {
+    "zh-CN": {
+      "name": "Paseo 团队管理",
+      "description": "自动为 Paseo 顶层指挥会话注入团队编排规范与角色配置，支持一键开关、团队模板管理和成员状态视图。"
+    }
+  }
+}
