@@ -446,6 +446,21 @@ export function MemberEditorModal({
         body: {
           gap: layout.compact ? 14 : 16,
         },
+        fieldBlock: {
+          paddingHorizontal: layout.compact ? 14 : 16,
+          paddingVertical: 12,
+          gap: 8,
+          borderTopColor: theme.colors.border,
+          borderTopWidth: StyleSheet.hairlineWidth,
+        },
+        fieldBlockFirst: {
+          borderTopWidth: 0,
+        },
+        fieldLabel: {
+          color: theme.colors.foreground,
+          fontSize: 13.5,
+          fontWeight: "500",
+        },
         textInput: {
           backgroundColor: theme.colors.surface2,
           borderColor: theme.colors.border,
@@ -456,11 +471,16 @@ export function MemberEditorModal({
           paddingHorizontal: 10,
           paddingVertical: layout.compact ? 8 : 9,
         },
+        rowTextInput: {
+          minWidth: layout.compact ? undefined : 220,
+        },
         multilineInput: {
-          minHeight: layout.compact ? 72 : 84,
+          width: "100%",
+          minHeight: layout.compact ? 76 : 84,
           textAlignVertical: "top",
         },
         promptInput: {
+          width: "100%",
           minHeight: layout.compact ? 96 : 112,
           textAlignVertical: "top",
         },
@@ -534,7 +554,7 @@ export function MemberEditorModal({
                 value={draft.name}
                 placeholder={t("memberModal.namePlaceholder")}
                 placeholderTextColor={theme.colors.foregroundMuted}
-                style={styles.textInput}
+                style={[styles.textInput, styles.rowTextInput]}
                 onChangeText={(name) => {
                   setNameError(null);
                   setDraft((current) => {
@@ -559,7 +579,7 @@ export function MemberEditorModal({
                 placeholderTextColor={theme.colors.foregroundMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
-                style={styles.textInput}
+                style={[styles.textInput, styles.rowTextInput]}
                 onChangeText={(roleId) => {
                   setRoleIdTouched(true);
                   setRoleIdError(null);
@@ -741,31 +761,39 @@ export function MemberEditorModal({
           ) : null}
 
           <SettingsCard>
-            <SettingsRow label={t("memberModal.responsibilitiesLabel")}>
+            <View style={[styles.fieldBlock, styles.fieldBlockFirst]}>
+              <Text style={styles.fieldLabel}>
+                {t("memberModal.responsibilitiesLabel")}
+              </Text>
               <TextInput
                 value={draft.responsibilities}
                 placeholder={t("memberModal.responsibilitiesPlaceholder")}
                 placeholderTextColor={theme.colors.foregroundMuted}
                 multiline={true}
+                numberOfLines={3}
                 style={[styles.textInput, styles.multilineInput]}
                 onChangeText={(responsibilities) =>
                   setDraft((current) => ({ ...current, responsibilities }))
                 }
               />
-            </SettingsRow>
+            </View>
 
-            <SettingsRow label={t("memberModal.rolePromptLabel")}>
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>
+                {t("memberModal.rolePromptLabel")}
+              </Text>
               <TextInput
                 value={draft.rolePrompt}
                 placeholder={t("memberModal.rolePromptPlaceholder")}
                 placeholderTextColor={theme.colors.foregroundMuted}
                 multiline={true}
+                numberOfLines={4}
                 style={[styles.textInput, styles.promptInput]}
                 onChangeText={(rolePrompt) =>
                   setDraft((current) => ({ ...current, rolePrompt }))
                 }
               />
-            </SettingsRow>
+            </View>
           </SettingsCard>
 
           <View style={styles.footerRow}>

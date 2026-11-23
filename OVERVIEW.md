@@ -13,7 +13,7 @@ Commanders delegate work through Paseo's native `create_agent` and `send_agent_p
 
 Requires Paseo 0.17.1 or later. Client controls and panels are built with cross-platform React Native primitives and work on desktop, web, iOS, and Android.
 
-Open Settings > Plugins > Team Manager (or run `/team settings` in a workspace composer) to review the default full-stack team preset, adjust roles using the live provider and model catalog from your host, or exclude casual directories such as `~/Downloads`.
+Open Team Manager from the sidebar header, open Settings > Plugins > Team Manager, or run `/team settings` in a workspace composer to review the default full-stack team preset, adjust roles using the live provider and model catalog from your host, or exclude casual directories such as `~/Downloads`.
 
 The built-in full-stack preset includes two enabled core roles and three optional roles using Codex GPT routing groups and Antigravity Gemini 4 models:
 

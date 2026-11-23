@@ -330,7 +330,9 @@ function TeamPanelView({
           paddingHorizontal: 9,
           paddingVertical: 3,
           flexDirection: "row",
+          alignSelf: "center",
           alignItems: "center",
+          justifyContent: "center",
           gap: 5,
         },
         pillEnabled: {

@@ -2,6 +2,7 @@ import {
   useRpc,
   useSettings,
   useTranslation,
+  type PluginScreenProps,
   type PluginSurfaceProps,
   type SettingsState,
 } from "@getpaseo/plugin/client";
@@ -9,6 +10,7 @@ import {
   copyText,
   Icon,
   Markdown,
+  ScrollView,
   SettingsAction,
   SettingsCard,
   SettingsRow,
@@ -483,6 +485,28 @@ function ReadyTeamSettingsContent({
         container: {
           gap: layout.compact ? 16 : 20,
         },
+        fieldBlock: {
+          paddingHorizontal: layout.compact ? 14 : 16,
+          paddingVertical: 12,
+          gap: 8,
+          borderTopColor: theme.colors.border,
+          borderTopWidth: StyleSheet.hairlineWidth,
+        },
+        fieldBlockFirst: {
+          borderTopWidth: 0,
+        },
+        fieldHeader: {
+          gap: 2,
+        },
+        fieldLabel: {
+          color: theme.colors.foreground,
+          fontSize: 13.5,
+          fontWeight: "500",
+        },
+        fieldHint: {
+          color: theme.colors.foregroundMuted,
+          fontSize: 12,
+        },
         textInput: {
           backgroundColor: theme.colors.surface2,
           borderColor: theme.colors.border,
@@ -493,14 +517,24 @@ function ReadyTeamSettingsContent({
           paddingHorizontal: 10,
           paddingVertical: layout.compact ? 8 : 9,
         },
-        multilineInput: {
-          minHeight: layout.compact ? 80 : 96,
+        fullWidthInput: {
+          width: "100%",
+        },
+        descriptionInput: {
+          width: "100%",
+          minHeight: 76,
+          textAlignVertical: "top",
+        },
+        extraInstructionsInput: {
+          width: "100%",
+          minHeight: 112,
           textAlignVertical: "top",
         },
         inlineInputRow: {
           flexDirection: layout.compact ? "column" : "row",
           gap: 8,
           alignItems: layout.compact ? "stretch" : "center",
+          width: "100%",
         },
         flexInput: {
           flex: 1,
@@ -508,8 +542,9 @@ function ReadyTeamSettingsContent({
         actionRow: {
           flexDirection: "row",
           flexWrap: "wrap",
+          alignItems: "center",
           gap: 8,
-          paddingTop: 4,
+          paddingTop: 2,
         },
         chipBtn: {
           backgroundColor: theme.colors.surface2,
@@ -593,8 +628,11 @@ function ReadyTeamSettingsContent({
           borderColor: theme.colors.statusSuccess,
           borderWidth: 1,
           borderRadius: 999,
-          paddingHorizontal: 8,
-          paddingVertical: 2,
+          paddingHorizontal: 10,
+          paddingVertical: 4,
+          alignSelf: "center",
+          alignItems: "center",
+          justifyContent: "center",
         },
         successBadgeText: {
           color: theme.colors.statusSuccess,
@@ -606,8 +644,11 @@ function ReadyTeamSettingsContent({
           borderColor: theme.colors.border,
           borderWidth: 1,
           borderRadius: 999,
-          paddingHorizontal: 8,
-          paddingVertical: 2,
+          paddingHorizontal: 10,
+          paddingVertical: 4,
+          alignSelf: "center",
+          alignItems: "center",
+          justifyContent: "center",
         },
         mutedBadgeText: {
           color: theme.colors.foregroundMuted,
@@ -747,10 +788,15 @@ function ReadyTeamSettingsContent({
       {/* Section 2: Excluded Directories */}
       <SettingsSection title={t("settings.sections.excludedDirs")}>
         <SettingsCard>
-          <SettingsRow
-            label={t("settings.excludedDirs.listLabel")}
-            hint={t("settings.excludedDirs.listHint")}
-          >
+          <View style={[styles.fieldBlock, styles.fieldBlockFirst]}>
+            <View style={styles.fieldHeader}>
+              <Text style={styles.fieldLabel}>
+                {t("settings.excludedDirs.listLabel")}
+              </Text>
+              <Text style={styles.fieldHint}>
+                {t("settings.excludedDirs.listHint")}
+              </Text>
+            </View>
             {draft.excludedDirectories.length === 0 ? (
               <Text style={styles.mutedText}>
                 {t("settings.excludedDirs.empty")}
@@ -785,12 +831,17 @@ function ReadyTeamSettingsContent({
                 ))}
               </View>
             )}
-          </SettingsRow>
+          </View>
 
-          <SettingsRow
-            label={t("settings.excludedDirs.inputLabel")}
-            hint={t("settings.excludedDirs.inputHint")}
-          >
+          <View style={styles.fieldBlock}>
+            <View style={styles.fieldHeader}>
+              <Text style={styles.fieldLabel}>
+                {t("settings.excludedDirs.inputLabel")}
+              </Text>
+              <Text style={styles.fieldHint}>
+                {t("settings.excludedDirs.inputHint")}
+              </Text>
+            </View>
             <View style={styles.inlineInputRow}>
               <TextInput
                 value={newDirInput}
@@ -822,7 +873,7 @@ function ReadyTeamSettingsContent({
                 </Text>
               </Pressable>
             </View>
-          </SettingsRow>
+          </View>
 
           <SettingsAction
             label={t("settings.excludedDirs.quickDownloadsLabel")}
@@ -855,7 +906,10 @@ function ReadyTeamSettingsContent({
             onValueChange={setSelectedPresetId}
           />
 
-          <SettingsRow label={activePreset?.name ?? ""}>
+          <View style={styles.fieldBlock}>
+            {activePreset?.name ? (
+              <Text style={styles.fieldLabel}>{activePreset.name}</Text>
+            ) : null}
             <View style={styles.actionRow}>
               {activePreset?.id === draft.defaultPresetId ? (
                 <View style={styles.successBadge}>
@@ -922,31 +976,39 @@ function ReadyTeamSettingsContent({
                 </Text>
               </Pressable>
             </View>
-          </SettingsRow>
+          </View>
 
           {activePreset ? (
             <>
-              <SettingsRow label={t("settings.presets.nameLabel")}>
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>
+                  {t("settings.presets.nameLabel")}
+                </Text>
                 <TextInput
                   value={activePreset.name}
                   placeholder={t("settings.presets.namePlaceholder")}
                   placeholderTextColor={theme.colors.foregroundMuted}
-                  style={styles.textInput}
+                  style={[styles.textInput, styles.fullWidthInput]}
                   onChangeText={(name) => patchActivePreset({ name })}
                 />
-              </SettingsRow>
+              </View>
 
-              <SettingsRow label={t("settings.presets.descriptionLabel")}>
+              <View style={styles.fieldBlock}>
+                <Text style={styles.fieldLabel}>
+                  {t("settings.presets.descriptionLabel")}
+                </Text>
                 <TextInput
                   value={activePreset.description}
                   placeholder={t("settings.presets.descriptionPlaceholder")}
                   placeholderTextColor={theme.colors.foregroundMuted}
-                  style={styles.textInput}
+                  multiline={true}
+                  numberOfLines={3}
+                  style={[styles.textInput, styles.descriptionInput]}
                   onChangeText={(description) =>
                     patchActivePreset({ description })
                   }
                 />
-              </SettingsRow>
+              </View>
 
               <SettingsSwitch
                 label={t("settings.presets.noDirectEditLabel")}
@@ -957,21 +1019,27 @@ function ReadyTeamSettingsContent({
                 }
               />
 
-              <SettingsRow
-                label={t("settings.presets.extraInstructionsLabel")}
-                hint={t("settings.presets.extraInstructionsHint")}
-              >
+              <View style={styles.fieldBlock}>
+                <View style={styles.fieldHeader}>
+                  <Text style={styles.fieldLabel}>
+                    {t("settings.presets.extraInstructionsLabel")}
+                  </Text>
+                  <Text style={styles.fieldHint}>
+                    {t("settings.presets.extraInstructionsHint")}
+                  </Text>
+                </View>
                 <TextInput
                   value={activePreset.commanderExtraInstructions}
                   placeholder={t("settings.presets.extraInstructionsPlaceholder")}
                   placeholderTextColor={theme.colors.foregroundMuted}
                   multiline={true}
-                  style={[styles.textInput, styles.multilineInput]}
+                  numberOfLines={4}
+                  style={[styles.textInput, styles.extraInstructionsInput]}
                   onChangeText={(commanderExtraInstructions) =>
                     patchActivePreset({ commanderExtraInstructions })
                   }
                 />
-              </SettingsRow>
+              </View>
             </>
           ) : null}
         </SettingsCard>
@@ -1292,5 +1360,44 @@ export function TeamSettingsScreen({ theme, layout }: PluginSurfaceProps) {
       theme={theme}
       layout={layout}
     />
+  );
+}
+
+export function TeamMainScreen({
+  theme,
+  layout,
+  host,
+  navigation,
+}: PluginScreenProps) {
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          flex: 1,
+          backgroundColor: theme.colors.surface0,
+        },
+        content: {
+          padding: layout.compact ? 16 : 24,
+        },
+        inner: {
+          maxWidth: 860,
+          width: "100%",
+          alignSelf: "center",
+        },
+      }),
+    [theme, layout.compact],
+  );
+
+  return (
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <View style={styles.inner}>
+        <TeamSettingsScreen
+          theme={theme}
+          layout={layout}
+          host={host}
+          navigation={navigation}
+        />
+      </View>
+    </ScrollView>
   );
 }

@@ -1,8 +1,12 @@
 import type { PluginCleanup } from "@getpaseo/plugin";
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type {
+  PluginClientContext,
+  PluginSidebarItemProps,
+} from "@getpaseo/plugin/client";
+import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { ComposerTeamControl } from "./client/composer-control.tsx";
 import { messages } from "./client/messages.ts";
-import { TeamSettingsScreen } from "./client/settings-screen.tsx";
+import { TeamMainScreen, TeamSettingsScreen } from "./client/settings-screen.tsx";
 import {
   bindSettingsStore,
   getSettingsStoreSnapshot,
@@ -21,6 +25,19 @@ import {
 } from "./client/team-state.ts";
 import { resolveEffectiveTeamConfig } from "./shared/policy.ts";
 import { METADATA_KEYS, SETTINGS_ID } from "./shared/settings.ts";
+
+function TeamSidebarItem({
+  currentScreen,
+  openScreen,
+}: PluginSidebarItemProps) {
+  return (
+    <SidebarRow
+      icon="Users"
+      active={currentScreen?.screenId === SETTINGS_ID}
+      onPress={() => openScreen({ screenId: SETTINGS_ID })}
+    />
+  );
+}
 
 export default function contribute(client: PluginClientContext) {
   let disposed = false;
@@ -46,6 +63,18 @@ export default function contribute(client: PluginClientContext) {
 
   syncDynamicContributions();
   const unsubscribeStore = subscribeSettingsStore(syncDynamicContributions);
+
+  const removeScreen = client.addScreen({
+    id: SETTINGS_ID,
+    title: messages.message("settings.title"),
+    Component: TeamMainScreen,
+  });
+
+  const removeSidebarItem = client.addSidebarHeaderItem({
+    id: SETTINGS_ID,
+    title: messages.message("settings.title"),
+    Component: TeamSidebarItem,
+  });
 
   const removeSettingsScreen = client.addSettingsScreen({
     id: SETTINGS_ID,
@@ -231,6 +260,8 @@ export default function contribute(client: PluginClientContext) {
     void removeWorkspacePanel();
     void removeAgentPanel();
     void removeSettingsScreen();
+    void removeSidebarItem();
+    void removeScreen();
     unbindStore();
   };
 }
