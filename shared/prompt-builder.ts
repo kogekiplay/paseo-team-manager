@@ -8,7 +8,7 @@ export function buildMemberCreateAgentParams(member: TeamMember, presetId: strin
       ? "<请先调用 list_providers / list_models 选择当前宿主机可用模型>"
       : formatProviderModel(member.provider, member.model),
     settings: {
-      ...(modeId ? { modeId } : {}),
+      ...(member.provider !== AUTO_PROVIDER && modeId ? { modeId } : {}),
       ...(thinkingOptionId ? { thinkingOptionId } : {}),
       ...(Object.keys(features).length > 0 ? { features } : {}),
     },

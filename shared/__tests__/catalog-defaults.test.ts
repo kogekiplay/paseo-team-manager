@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { findSvgIconProblem } from "@getpaseo/plugin";
 import { resolvePresetMembers, resolveRoleFromCatalog, resolveTeamMember } from "../catalog-defaults.ts";
 import { TEAM_MANAGER_ICON } from "../icon.ts";
-import { createDefaultPresets, type TeamMember } from "../settings.ts";
+import { createDefaultPresets } from "../settings.ts";
 import type { ProviderCatalogEntry } from "../contracts.ts";
 
 function catalogEntry(provider: string, models: ProviderCatalogEntry["models"], options: Partial<ProviderCatalogEntry> = {}): ProviderCatalogEntry {
@@ -61,15 +61,18 @@ test("the default roles resolve across Magpie Codex and Antigravity", () => {
   const { resolved } = resolvePresetMembers(preset, [codex, antigravity]);
   const byRole = new Map(resolved.map((item) => [item.member.roleId, item]));
   assert.deepEqual(["backend", "qa", "reviewer"].map((role) => [byRole.get(role)?.member.provider, byRole.get(role)?.member.model, byRole.get(role)?.member.thinkingOptionId, byRole.get(role)?.member.modeId]), [
-    ["codex", "auto/gpt-6.2-sol", "xhigh", "full-access"],
-    ["codex", "auto/gpt-6.2-sol", "xhigh", "full-access"],
-    ["codex", "auto/gpt-6.2-sol", "xhigh", "auto"],
+    ["codex", "auto/gpt-6.2-sol", "xhigh", ""],
+    ["codex", "auto/gpt-6.2-sol", "xhigh", ""],
+    ["codex", "auto/gpt-6.2-sol", "xhigh", ""],
   ]);
   assert.deepEqual([byRole.get("backend")?.member.features, byRole.get("frontend")?.member.features], [{ service_tier: "default" }, {}]);
   assert.deepEqual([byRole.get("frontend")?.member.model, byRole.get("explorer")?.member.model], ["gemini-4-neon", "gemini-4-hydrogen"]);
   assert.equal(byRole.get("frontend")?.member.thinkingOptionId, "high");
   assert.equal(byRole.get("explorer")?.member.thinkingOptionId, "medium");
-  for (const item of resolved) assert.equal(item.status, "auto-matched");
+  for (const item of resolved) {
+    assert.equal(item.status, "auto-matched");
+    assert.equal(item.member.modeId, "");
+  }
   const serialized = JSON.stringify(resolved);
   assert.doesNotMatch(serialized, /astra|fable|gemini-3\.8-flash|claude/i);
 });
@@ -78,7 +81,7 @@ test("native Codex without Magpie gets its real default model and no unsupported
   const resolved = resolveRoleFromCatalog("backend", [catalogEntry("codex", [
     { id: "gpt-5.4", label: "GPT-5.4", isDefault: true, thinkingOptions: [thinking("high", true)] },
   ])]);
-  assert.deepEqual(resolved, { provider: "codex", model: "gpt-5.4", thinkingOptionId: "high", modeId: "full-access", features: {} });
+  assert.deepEqual(resolved, { provider: "codex", model: "gpt-5.4", thinkingOptionId: "high", modeId: "", features: {} });
 });
 
 test("a pure Claude host resolves every default role with catalog-supported options", () => {
@@ -89,7 +92,7 @@ test("a pure Claude host resolves every default role with catalog-supported opti
     assert.equal(item.member.provider, "claude");
     assert.ok(item.member.model.startsWith("claude-"));
     assert.ok(["high", "medium", "low"].includes(item.member.thinkingOptionId));
-    assert.ok(["default", "bypassPermissions", "plan"].includes(item.member.modeId));
+    assert.equal(item.member.modeId, "");
     assert.equal(item.status, "auto-matched");
   }
 });
@@ -98,7 +101,7 @@ test("an arbitrary ready provider is a valid host fallback", () => {
   const resolved = resolveRoleFromCatalog("backend", [catalogEntry("opencode", [
     { id: "foo-model", label: "Foo", isDefault: true, thinkingOptions: [thinking("medium", true)] },
   ])]);
-  assert.deepEqual(resolved, { provider: "opencode", model: "foo-model", thinkingOptionId: "medium", modeId: "full-access", features: {} });
+  assert.deepEqual(resolved, { provider: "opencode", model: "foo-model", thinkingOptionId: "medium", modeId: "", features: {} });
 });
 
 test("explicit configurations fall back without mutating the saved member", () => {
@@ -115,11 +118,56 @@ test("explicit configurations fall back without mutating the saved member", () =
   assert.equal(unavailable.member.provider, "codex");
 });
 
-test("an auto member falls back to the caller provider when the catalog is empty", () => {
-  const member = createDefaultPresets()[0].members[0];
-  const resolved = resolveTeamMember(member, [], "codex");
-  assert.equal(resolved.status, "fallback-caller");
-  assert.equal(resolved.member.provider, "codex");
-  assert.equal(resolved.member.model, "");
-  assert.match(resolved.fallbackReason ?? "", /caller provider/);
+test("auto members discard a saved permission mode across all outcomes", () => {
+  const member = { ...createDefaultPresets()[0].members[0], modeId: "full-access" };
+  const matched = resolveTeamMember(member, [codex]);
+  const caller = resolveTeamMember(member, [], "codex");
+  const unresolved = resolveTeamMember(member, []);
+  assert.equal(matched.status, "auto-matched");
+  assert.equal(caller.status, "fallback-caller");
+  assert.equal(caller.member.provider, "codex");
+  assert.equal(caller.member.model, "");
+  assert.match(caller.fallbackReason ?? "", /caller provider/);
+  assert.equal(unresolved.status, "unresolved");
+  for (const result of [matched, caller, unresolved]) {
+    assert.equal(result.member.modeId, "");
+    assert.equal(result.configured.modeId, "full-access");
+  }
+});
+
+test("an explicit mode survives when the provider stays the same and supports it", () => {
+  const member = { ...createDefaultPresets()[0].members[0], provider: "codex", model: "auto/gpt-6.2-sol", modeId: "full-access" };
+  const explicit = resolveTeamMember(member, [codex]);
+  assert.equal(explicit.status, "explicit");
+  assert.strictEqual(explicit.member, member);
+
+  const missingModel = { ...member, model: "retired-model" };
+  for (const [modes, configuredMode, expectedMode] of [
+    [codex.modes, "full-access", "full-access"],
+    [[], "full-access", "full-access"],
+    [codex.modes, "", ""],
+    [codex.modes, "bypassPermissions", ""],
+  ] as const) {
+    const fallback = resolveTeamMember({ ...missingModel, modeId: configuredMode }, [{ ...codex, modes: [...modes] }]);
+    assert.equal(fallback.status, "fallback-host");
+    assert.equal(fallback.member.model, member.model);
+    assert.equal(fallback.member.modeId, expectedMode);
+  }
+});
+
+test("fallback discards permission modes across providers and keeps a canonical caller match", () => {
+  const member = { ...createDefaultPresets()[0].members[0], provider: "claude", model: "claude-sonnet", modeId: "bypassPermissions" };
+  const hostFallback = resolveTeamMember(member, [{ ...codex, modes: claude.modes }]);
+  assert.equal(hostFallback.status, "fallback-host");
+  assert.equal(hostFallback.member.provider, "codex");
+  assert.equal(hostFallback.member.modeId, "");
+
+  const unavailable = [{ ...claude, enabled: false }];
+  const callerFallback = resolveTeamMember(member, unavailable, "codex");
+  assert.equal(callerFallback.status, "fallback-caller");
+  assert.equal(callerFallback.member.provider, "codex");
+  assert.equal(callerFallback.member.modeId, "");
+  const sameCaller = resolveTeamMember(member, unavailable, " Claude ");
+  assert.equal(sameCaller.status, "fallback-caller");
+  assert.equal(sameCaller.member.modeId, member.modeId);
 });

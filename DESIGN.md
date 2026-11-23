@@ -51,9 +51,9 @@
   - `auto/gpt-6.1-terra`（GPT-6.1 Terra · routing group）
   - `auto/gpt-6-luna`（GPT-6 Luna · routing group）
 
-> 注意：调用 Paseo `create_agent` MCP 时，Codex 后端成员的完整参数为：
+> 自动匹配到 Codex 时，后端成员的 `create_agent` 配置示例
 > - `provider`: `"codex/auto/gpt-6.2-sol"`
-> - `settings`: `{ "modeId": "full-access", "thinkingOptionId": "xhigh", "features": { "service_tier": "default" } }`
+> - `settings`: `{ "thinkingOptionId": "xhigh", "features": { "service_tier": "default" } }`
 
 ### 3.2 Antigravity（8 个模型）
 
@@ -69,9 +69,9 @@
   - `gemini-pro-orchestrator-argon`（Orchestrator (Argon)）
   - `gpt-oss-120b-medium`（GPT-OSS 120B (Medium)）
 
-> 调用 Paseo `create_agent` MCP 时，Antigravity 前端成员的完整参数为：
+> 自动匹配到 Antigravity 时，前端成员的 `create_agent` 配置示例
 > - `provider`: `"antigravity/gemini-4-neon"`
-> - `settings`: `{ "modeId": "full-access", "thinkingOptionId": "high" }`
+> - `settings`: `{ "thinkingOptionId": "high" }`
 
 ---
 
@@ -90,16 +90,16 @@
 
 | 角色 ID | 名称 | 默认启用 | Provider / Model | Thinking | Mode | Features | 职责 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `backend` | 后端开发 | 是 | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | 服务端/daemon/API/数据层/算法逻辑/单元测试 |
-| `frontend` | 前端开发 | 是 | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | UI 组件、交互体验、样式主题、跨端响应式适配 |
+| `backend` | 后端开发 | 是 | `auto`（宿主机自适应） | 宿主机自适应 | 继承默认权限 | 宿主机自适应 | 服务端/daemon/API/数据层/算法逻辑/单元测试 |
+| `frontend` | 前端开发 | 是 | `auto`（宿主机自适应） | 宿主机自适应 | 继承默认权限 | 宿主机自适应 | UI 组件、交互体验、样式主题、跨端响应式适配 |
 
 ### 4.3 内置可选扩展成员（预设中预置，可一键开关）
 
 | 角色 ID | 名称 | 默认启用 | 推荐 Provider / Model | Thinking | Mode | Features | 定位 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `reviewer` | 代码审查官 | 否（按需开启） | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | 深度 Code Review、架构风险/边界条件/安全审计，只审查提意见不改代码 |
-| `qa` | 测试与验收 | 否（按需开启） | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | 编写单元/集成/E2E 测试、复现 Bug、跑回归验证 |
-| `explorer` | 代码库侦察员 | 否（按需开启） | `auto`（宿主机自适应） | 宿主机自适应 | 宿主机自适应 | 宿主机自适应 | 极速代码库检索、依赖梳理、日志定位、文档整理，节省主指挥上下文 |
+| `reviewer` | 代码审查官 | 否（按需开启） | `auto`（宿主机自适应） | 宿主机自适应 | 继承默认权限 | 宿主机自适应 | 深度 Code Review、架构风险/边界条件/安全审计，只审查提意见不改代码 |
+| `qa` | 测试与验收 | 否（按需开启） | `auto`（宿主机自适应） | 宿主机自适应 | 继承默认权限 | 宿主机自适应 | 编写单元/集成/E2E 测试、复现 Bug、跑回归验证 |
+| `explorer` | 代码库侦察员 | 否（按需开启） | `auto`（宿主机自适应） | 宿主机自适应 | 继承默认权限 | 宿主机自适应 | 极速代码库检索、依赖梳理、日志定位、文档整理，节省主指挥上下文 |
 
 ---
 
@@ -119,7 +119,7 @@
       - `commanderExtraInstructions`: string（自定义补充指挥规范）
       - `members`: 成员配置数组（`id`, `roleId`, `name`, `enabled`, `provider`, `model`, `thinkingOptionId`, `modeId`, `features`, `responsibilities`, `rolePrompt`）
     - `workspaceOverrides`: `Record<string, { enabled?: boolean; presetId?: string }>`（按项目/工作区路径或 ID 覆盖默认行为）
-    - 内置成员使用 `provider: "auto"` 和空模型字段。服务端从当前宿主机实时 Provider 目录解析具体模型、Thinking、Mode 与 Provider options，避免依赖 Magpie 路由组或某个已安装 Provider。
+    - 内置成员使用 `provider: "auto"` 和空模型字段。服务端从宿主机实时目录解析提供方、模型、思考等级与支持的提供方选项。自动匹配和跨提供方回退均省略会话权限模式，继承 Paseo 默认权限。插件仅在用户为实际使用的提供方显式选择权限模式时应用预设值。
   - 常量定义：
     - `METADATA_KEYS`:
       - `teamEnabled`: `"paseo-team-manager.enabled"`（`boolean`，单会话显式覆盖）
@@ -183,6 +183,6 @@
 - [ ] `npm test` 单元测试全绿（覆盖 prompt 生成、顶层/子智能体判定、排除目录/metadata 优先级、配置校验与默认值、工具返回结构）。
 - [ ] `rg -n "document\.|window\.|localStorage|navigator\.|<[a-z]+[ >]|className=|onClick=" client/` 无任何违规命中。
 - [ ] 本地路径安装到 Paseo daemon：`paseo plugin install /path/to/paseo-team-manager`，`paseo plugin ls` 显示 `paseo-team-manager` 状态为 `running` 且无报错。
-- [ ] 实测验证：新开一个顶层会话，确认指挥在无人工提示下即可明确知道自己的指挥身份（不改代码）以及后端（Codex `auto/gpt-6.2-sol` xhigh、`service_tier: default`、full-access）与前端（Antigravity `gemini-4-neon` high、full-access）的准确配置，并能调用 `team_get_roster`；同时确认创建出的子智能体不会误注入指挥指令，而是获得角色专属指令。
+- [ ] 新开顶层会话，确认指挥能识别自己的职责并调用 `team_get_roster`。在具备 Magpie Codex 和 Antigravity 的环境中，确认示例包含后端的 `auto/gpt-6.2-sol`、`xhigh`、`service_tier: default` 和前端的 `gemini-4-neon`、`high`，两者均继承 Paseo 默认权限。确认创建的子智能体获得角色专属指令。
 - [ ] 完整撰写 `OVERVIEW.md` 与 `OVERVIEW.zh-CN.md`（遵循 Paseo 官方 listing 规范）。
 - [ ] 不重启 Paseo daemon。

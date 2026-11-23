@@ -18,13 +18,15 @@ The default full-stack preset includes two active members and three optional mem
 
 | Role | Provider and model | Thinking | Mode |
 | --- | --- | --- | --- |
-| Backend | `auto` host-adaptive | host-adaptive | host-adaptive |
-| Frontend | `auto` host-adaptive | host-adaptive | host-adaptive |
-| Reviewer | `auto` host-adaptive | host-adaptive | host-adaptive |
-| QA | `auto` host-adaptive | host-adaptive | host-adaptive |
-| Explorer | `auto` host-adaptive | host-adaptive | host-adaptive |
+| Backend | `auto` host-adaptive | host-adaptive | Inherited |
+| Frontend | `auto` host-adaptive | host-adaptive | Inherited |
+| Reviewer | `auto` host-adaptive | host-adaptive | Inherited |
+| QA | `auto` host-adaptive | host-adaptive | Inherited |
+| Explorer | `auto` host-adaptive | host-adaptive | Inherited |
 
 The default preset stores `provider: "auto"` and resolves each role against the host's ready Provider catalog. On a typical Magpie-enabled host, backend and QA resolve to Codex `auto/gpt-6.2-sol` with `xhigh`, frontend resolves to Antigravity `gemini-4-neon`, and explorer resolves to Antigravity `gemini-4-hydrogen`. Native Codex, Claude Code, Antigravity-only, and other ready providers receive supported fallbacks. Optional roles start disabled and can be enabled in the team settings.
+
+Auto-match and cross-provider fallback leave the session permission mode unset so the session inherits Paseo's defaults. The plugin applies a preset permission mode only when you explicitly select it for the provider that will run the agent.
 
 The global team switch is a hard gate. When it is disabled, session metadata and workspace overrides cannot enable team behavior. Creation defaults apply only when team mode is enabled for the current directory or workspace and the new agent explicitly carries the team role metadata.
 

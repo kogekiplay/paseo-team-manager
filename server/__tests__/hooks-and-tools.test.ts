@@ -29,22 +29,47 @@ const openRequest: PluginHookRequests["agent.open.before"] = {
 };
 const parentLabel = { [PARENT_AGENT_ID_LABEL]: openRequest.agentId };
 
-test("create fills missing defaults and role metadata without changing cwd or the request", () => {
+test("create fills model defaults and role metadata while leaving auto permissions unset", () => {
   const request = {
     config: { provider: "codex", cwd, title: "[BACKEND] 新建接口" },
     metadata: { [METADATA_KEYS.roleId]: "BACKEND" },
     env: { EXISTING: "value" },
   };
   const result = applyAgentCreateBefore(request, settings, homeDir, codexCatalog);
+  assert.equal(result?.config.modeId, undefined);
   assert.deepEqual(result, {
     ...request,
     config: {
-      ...request.config, model: "auto/gpt-6.2-sol", modeId: "full-access", thinkingOptionId: "xhigh",
+      ...request.config, model: "auto/gpt-6.2-sol", thinkingOptionId: "xhigh",
       providerOptions: { service_tier: "default" },
     },
     metadata: { [METADATA_KEYS.roleId]: "BACKEND", [METADATA_KEYS.presetId]: "default-fullstack" },
   });
   assert.deepEqual(request.config, { provider: "codex", cwd, title: "[BACKEND] 新建接口" });
+});
+
+test("create fills an explicit permission mode for its provider and omits it on cross-provider fallback", () => {
+  const [preset] = createDefaultPresets();
+  const backend = { ...preset.members[0], provider: "codex", model: "auto/gpt-6.2-sol", modeId: "full-access" };
+  const configured = parseTeamSettings({ presets: [{ ...preset, members: [backend] }] });
+  const request = { config: { provider: "codex", cwd }, metadata: { [METADATA_KEYS.roleId]: "backend" } };
+  const explicit = applyAgentCreateBefore(request, configured, homeDir, codexCatalog);
+  assert.equal(explicit?.config.modeId, "full-access");
+
+  const updatedCatalog = [{ ...codexCatalog[0], models: [{ ...codexCatalog[0].models[0], id: "gpt-5.4" }] }];
+  const sameProvider = applyAgentCreateBefore(request, configured, homeDir, updatedCatalog);
+  assert.equal(sameProvider?.config.model, "gpt-5.4");
+  assert.equal(sameProvider?.config.modeId, "full-access");
+
+  const fallbackCatalog = [{ ...updatedCatalog[0], provider: "opencode" }];
+  const fallback = applyAgentCreateBefore({ ...request, config: { provider: "opencode", cwd } }, configured, homeDir, fallbackCatalog);
+  assert.equal(fallback?.config.model, "gpt-5.4");
+  assert.equal(fallback?.config.modeId, undefined);
+
+  const unavailableCatalog = [{ ...codexCatalog[0], enabled: false }];
+  const callerFallback = applyAgentCreateBefore({ ...request, config: { provider: "opencode", cwd } }, configured, homeDir, unavailableCatalog);
+  assert.ok(callerFallback);
+  assert.equal(callerFallback.config.modeId, undefined);
 });
 
 test("create preserves explicit options and chooses the metadata role and preferred preset", () => {
@@ -108,6 +133,7 @@ test("open skips history and background and adds the commander prompt and roster
   assert.equal(result?.tools[0].name, "team_get_roster");
   assert.equal(result?.appendSystemPrompt?.[0], "Existing prompt");
   assert.match(result?.appendSystemPrompt?.[1] ?? "", /Commander/);
+  assert.doesNotMatch(result?.appendSystemPrompt?.[1] ?? "", /"modeId"/);
   assert.equal(openRequest.tools.length, 0);
 });
 
@@ -181,12 +207,13 @@ test("roster returns current settings, native create parameters and live team ch
   assert.equal(roster.members[4].enabled, false);
   assert.deepEqual(roster.members[0].createAgentParams, {
     provider: "codex/auto/gpt-6.2-sol",
-    settings: { modeId: "full-access", thinkingOptionId: "xhigh", features: { service_tier: "default" } },
+    settings: { thinkingOptionId: "xhigh", features: { service_tier: "default" } },
     labels: { [LABEL_KEYS.role]: "backend", [LABEL_KEYS.preset]: "updated" }, recommendedTitlePrefix: "[backend] ",
   });
   assert.deepEqual(roster.agents.map(({ agentId }) => agentId), ["live"]);
   assert.equal(roster.agentListError, null);
   assert.match(result.text ?? "", /团队成员[\s\S]*codex\/auto\/gpt-6\.2-sol[\s\S]*`live`/);
+  assert.doesNotMatch(result.text ?? "", /"modeId"/);
 
   const unavailable = { agents: { list: async () => { throw new Error("agent list unavailable"); } } } as unknown as PaseoApi;
   const degraded = await liveTool.execute({}, { ...context, paseo: unavailable });

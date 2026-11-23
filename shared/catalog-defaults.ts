@@ -24,7 +24,6 @@ interface RolePreferences {
   providers: string[];
   modelIds: string[];
   thinkingIds: string[];
-  modeIds: string[];
 }
 
 const ROLE_ALIASES: Record<string, string> = {
@@ -41,25 +40,21 @@ const ROLE_PREFERENCES: Record<string, RolePreferences> = {
     providers: ["codex", "claude", "antigravity"],
     modelIds: ["auto/gpt-6.2-sol"],
     thinkingIds: ["xhigh", "high", "medium"],
-    modeIds: ["full-access", "bypassPermissions", "bypass", "auto"],
   },
   frontend: {
     providers: ["antigravity", "claude", "codex"],
     modelIds: ["gemini-4-neon", "gemini-4-carbon"],
     thinkingIds: ["high", "medium"],
-    modeIds: ["full-access", "auto", "accept-edits"],
   },
   reviewer: {
     providers: ["codex", "claude", "antigravity"],
     modelIds: ["auto/gpt-6.2-sol"],
     thinkingIds: ["xhigh", "high", "medium"],
-    modeIds: ["auto", "plan", "read-only", "default"],
   },
   explorer: {
     providers: ["antigravity", "claude", "codex"],
     modelIds: ["gemini-4-hydrogen", "gemini-4-argon", "auto/gpt-6-luna", "auto/gpt-6.1-terra", "auto/gpt-6.2-sol"],
     thinkingIds: ["medium", "low", "high"],
-    modeIds: ["plan", "read-only", "auto", "default"],
   },
 };
 
@@ -67,7 +62,6 @@ const DEFAULT_PREFERENCES: RolePreferences = {
   providers: ["codex", "claude", "antigravity"],
   modelIds: [],
   thinkingIds: ["xhigh", "high", "medium"],
-  modeIds: ["full-access", "auto", "plan", "read-only", "default"],
 };
 
 export function isHighCostModelId(modelId: string): boolean {
@@ -131,7 +125,7 @@ function rolePreferences(roleId: string): RolePreferences {
 export function resolveRoleFromCatalog(
   roleId: string,
   providers: readonly ProviderCatalogEntry[],
-  options: { preferredThinking?: string; preferredMode?: string } = {},
+  options: { preferredThinking?: string } = {},
 ): { provider: string; model: string; thinkingOptionId: string; modeId: string; features: Record<string, FeatureValue> } | null {
   const preferences = rolePreferences(roleId);
   const entry = chooseEntry(roleId, providers);
@@ -143,24 +137,12 @@ export function resolveRoleFromCatalog(
   const model = chooseModel(entry, modelIds);
   if (!model) return null;
   const thinkingOptionId = chooseOption(model.thinkingOptions, options.preferredThinking ? [options.preferredThinking, ...preferences.thinkingIds] : preferences.thinkingIds, "");
-  const modeId = chooseOption(entry.modes, options.preferredMode ? [options.preferredMode, ...preferences.modeIds] : preferences.modeIds, entry.defaultModeId ?? "");
   return {
     provider: entry.provider,
     model: model.id,
     thinkingOptionId,
-    modeId,
+    modeId: "",
     features: hasDefaultServiceTier(entry.controls) ? { service_tier: "default" } : {},
-  };
-}
-
-function copyResolvedMember(member: TeamMember, resolved: ReturnType<typeof resolveRoleFromCatalog>): TeamMember {
-  return {
-    ...member,
-    provider: resolved?.provider ?? member.provider,
-    model: resolved?.model ?? member.model,
-    thinkingOptionId: resolved?.thinkingOptionId ?? member.thinkingOptionId,
-    modeId: resolved?.modeId ?? member.modeId,
-    features: resolved?.features ?? member.features,
   };
 }
 
@@ -169,21 +151,20 @@ export function resolveTeamMember(
   providers: readonly ProviderCatalogEntry[],
   fallbackProvider?: string | null,
 ): ResolvedTeamMember {
+  const options = { preferredThinking: member.thinkingOptionId || undefined };
+  const callerProvider = fallbackProvider?.trim();
   if (member.provider === AUTO_PROVIDER) {
-    const resolved = resolveRoleFromCatalog(member.roleId, providers, {
-      preferredThinking: member.thinkingOptionId || undefined,
-      preferredMode: member.modeId || undefined,
-    });
-    if (resolved) return { member: copyResolvedMember(member, resolved), configured: member, status: "auto-matched", fallbackReason: null };
-    if (fallbackProvider?.trim()) {
+    const resolved = resolveRoleFromCatalog(member.roleId, providers, options);
+    if (resolved) return { member: { ...member, ...resolved }, configured: member, status: "auto-matched", fallbackReason: null };
+    if (callerProvider) {
       return {
-        member: { ...member, provider: fallbackProvider.trim(), model: "", features: {} },
+        member: { ...member, provider: callerProvider, model: "", modeId: "", features: {} },
         configured: member,
         status: "fallback-caller",
-        fallbackReason: `No ready catalog model matched role ${member.roleId}. Using the caller provider ${fallbackProvider.trim()} without a model override.`,
+        fallbackReason: `No ready catalog model matched role ${member.roleId}. Using the caller provider ${callerProvider} without a model override.`,
       };
     }
-    return { member, configured: member, status: "unresolved", fallbackReason: `No ready provider model matched role ${member.roleId}.` };
+    return { member: { ...member, modeId: "" }, configured: member, status: "unresolved", fallbackReason: `No ready provider model matched role ${member.roleId}.` };
   }
 
   if (providers.length === 0) return { member, configured: member, status: "explicit", fallbackReason: null };
@@ -192,33 +173,31 @@ export function resolveTeamMember(
   if (ready && (selectableModels(entry).length === 0 || selectableModels(entry).some((model) => model.id === member.model))) {
     return { member, configured: member, status: "explicit", fallbackReason: null };
   }
-  const sameProvider = ready && entry ? resolveRoleFromCatalog(member.roleId, [entry], {
-    preferredThinking: member.thinkingOptionId || undefined,
-    preferredMode: member.modeId || undefined,
-  }) : null;
-  const resolved = sameProvider ?? resolveRoleFromCatalog(member.roleId, providers, {
-    preferredThinking: member.thinkingOptionId || undefined,
-    preferredMode: member.modeId || undefined,
-  });
+  const sameProvider = ready && entry ? resolveRoleFromCatalog(member.roleId, [entry], options) : null;
+  const resolved = sameProvider ?? resolveRoleFromCatalog(member.roleId, providers, options);
   if (resolved) {
+    const configuredMode = member.modeId.trim();
+    const keepsConfiguredMode = sameProvider && entry && configuredMode !== "" &&
+      (entry.modes.length === 0 || entry.modes.some(({ id }) => id === configuredMode));
     return {
-      member: copyResolvedMember(member, resolved),
+      member: { ...member, ...resolved, modeId: keepsConfiguredMode ? member.modeId : "" },
       configured: member,
       status: "fallback-host",
-      fallbackReason: ready
+      fallbackReason: sameProvider
         ? `Configured model ${member.model} is unavailable in provider ${member.provider}. Selected an available model from the same provider.`
         : `Configured provider ${member.provider} is unavailable. Selected an available provider and model from the host catalog.`,
     };
   }
-  if (fallbackProvider?.trim()) {
+  if (callerProvider) {
+    const modeId = canonicalProvider(member.provider) === canonicalProvider(callerProvider) ? member.modeId : "";
     return {
-      member: { ...member, provider: fallbackProvider.trim(), model: "", features: {} },
+      member: { ...member, provider: callerProvider, model: "", modeId, features: {} },
       configured: member,
       status: "fallback-caller",
-      fallbackReason: `Configured provider ${member.provider} is unavailable and no host catalog fallback exists. Using the caller provider ${fallbackProvider.trim()} without a model override.`,
+      fallbackReason: `Configured provider ${member.provider} is unavailable and no host catalog fallback exists. Using the caller provider ${callerProvider} without a model override.`,
     };
   }
-  return { member, configured: member, status: "unresolved", fallbackReason: `Configured provider ${member.provider} and model ${member.model} are unavailable.` };
+  return { member: { ...member, modeId: "" }, configured: member, status: "unresolved", fallbackReason: `Configured provider ${member.provider} and model ${member.model} are unavailable.` };
 }
 
 export function resolvePresetMembers(

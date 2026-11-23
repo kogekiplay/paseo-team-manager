@@ -23,17 +23,18 @@ test("the commander gets copyable native tool parameters for enabled members", (
     .map(([, json]) => JSON.parse(json));
   assert.deepEqual(backend, {
     provider: "codex/auto/gpt-6.2-sol",
-    settings: { modeId: "full-access", thinkingOptionId: "xhigh", features: { service_tier: "default" } },
+    settings: { thinkingOptionId: "xhigh", features: { service_tier: "default" } },
     labels: { "paseo-team-manager.role": "backend", "paseo-team-manager.preset": "default-fullstack" },
     title: "[backend] 任务标题", initialPrompt: "填写任务目标、文件边界、接口契约与验收要求。", notifyOnFinish: true,
   });
   assert.deepEqual(frontend, {
     provider: "antigravity/gemini-4-neon",
-    settings: { modeId: "full-access", thinkingOptionId: "high" },
+    settings: { thinkingOptionId: "high" },
     labels: { "paseo-team-manager.role": "frontend", "paseo-team-manager.preset": "default-fullstack" },
     title: "[frontend] 任务标题", initialPrompt: "填写任务目标、文件边界、接口契约与验收要求。", notifyOnFinish: true,
   });
   assert.deepEqual(otherExamples, []);
+  assert.doesNotMatch(prompt, /"modeId"/);
   const optional = prompt.split("### 可选扩展角色")[1];
   for (const text of ["默认未启用", "reviewer", "qa", "explorer"]) assert.ok(optional.includes(text));
   for (const text of ["create_agent", "send_agent_prompt", "team_get_roster", "Subagents", "worktree", "避免循环轮询"]) {
@@ -41,6 +42,23 @@ test("the commander gets copyable native tool parameters for enabled members", (
   }
   assert.match(prompt, /provider\/model/);
   assert.match(prompt, /禁止擅自升级或切换为 `astra`、`fable` 等高成本模型/);
+});
+
+test("commander examples carry permission modes only for the explicitly selected provider", () => {
+  const [preset] = createDefaultPresets();
+  const member = { ...preset.members[0], provider: "codex", model: "auto/gpt-6.2-sol", modeId: "full-access" };
+  const configured = { ...preset, members: [member] };
+  const explicit = resolvePresetMembers(configured, catalog).resolved;
+  assert.equal(buildMemberCreateAgentParams(explicit[0].member, preset.id).settings.modeId, "full-access");
+  assert.match(buildCommanderPrompt({ preset: configured, resolvedMembers: explicit }), /"modeId": "full-access"/);
+
+  const fallback = resolvePresetMembers(configured, [catalog[1]]).resolved;
+  assert.equal(fallback[0].status, "fallback-host");
+  assert.deepEqual(buildMemberCreateAgentParams(fallback[0].member, preset.id).settings, { thinkingOptionId: "high" });
+  assert.doesNotMatch(buildCommanderPrompt({ preset: configured, resolvedMembers: fallback }), /"modeId"/);
+
+  const auto = { ...configured, members: [{ ...preset.members[0], modeId: "full-access" }] };
+  assert.doesNotMatch(buildCommanderPrompt({ preset: auto }), /"modeId"/);
 });
 
 test("commander can make small changes when configured and receives trimmed extra instructions", () => {
