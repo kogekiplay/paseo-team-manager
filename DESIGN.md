@@ -54,9 +54,9 @@
 
 > 注意：调用 Paseo `create_agent` MCP 时，Codex 后端成员的完整参数为：
 > - `provider`: `"codex/auto/gpt-6.2-sol"`
-> - `settings`: `{ "modeId": "full-access", "thinkingOptionId": "high", "features": { "service_tier": "default" } }`
+> - `settings`: `{ "modeId": "full-access", "thinkingOptionId": "xhigh", "features": { "service_tier": "default" } }`
 
-### 3.2 Antigravity（11 个模型）
+### 3.2 Antigravity（8 个模型）
 
 - 可用 Modes：`default`、`accept-edits`、`auto`、`plan`、`full-access`（Full access，`isUnattended: true`）
 - 可用 Thinking Options：`low`、`medium`、`high`（默认）、`xhigh`（Extra）
@@ -68,9 +68,6 @@
   - `gemini-pro-orchestrator-neon`（Orchestrator (Neon)）
   - `gemini-pro-orchestrator`（Orchestrator (Carbon)）
   - `gemini-pro-orchestrator-argon`（Orchestrator (Argon)）
-  - `gemini-3.8-flash`（Gemini 3.8 Flash）
-  - `claude-opus-5-5`（Claude Opus 5.5）
-  - `claude-sonnet-5-5`（Claude Sonnet 5.5）
   - `gpt-oss-120b-medium`（GPT-OSS 120B (Medium)）
 
 > 调用 Paseo `create_agent` MCP 时，Antigravity 前端成员的完整参数为：
@@ -94,16 +91,16 @@
 
 | 角色 ID | 名称 | 默认启用 | Provider / Model | Thinking | Mode | Features | 职责 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `backend` | 后端开发 | 是 | `codex/auto/gpt-6.2-sol` | `high` | `full-access` | `{ "service_tier": "default" }` | 服务端/daemon/API/数据层/算法逻辑/单元测试 |
+| `backend` | 后端开发 | 是 | `codex/auto/gpt-6.2-sol` | `xhigh` | `full-access` | `{ "service_tier": "default" }` | 服务端/daemon/API/数据层/算法逻辑/单元测试 |
 | `frontend` | 前端开发 | 是 | `antigravity/gemini-4-neon` | `high` | `full-access` | `{}` | UI 组件、交互体验、样式主题、跨端响应式适配 |
 
 ### 4.3 内置可选扩展成员（预设中预置，可一键开关）
 
 | 角色 ID | 名称 | 默认启用 | 推荐 Provider / Model | Thinking | Mode | Features | 定位 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `reviewer` | 代码审查官 | 否（按需开启） | `antigravity/claude-opus-5-5` 或 `codex/auto/gpt-6.2-astra` | `high` | `plan` / `auto` | `{}` | 深度 Code Review、架构风险/边界条件/安全审计，只审查提意见不改代码 |
-| `qa` | 测试与验收 | 否（按需开启） | `antigravity/claude-sonnet-5-5` | `high` | `full-access` | `{}` | 编写单元/集成/E2E 测试、复现 Bug、跑回归验证 |
-| `explorer` | 代码库侦察员 | 否（按需开启） | `antigravity/gemini-3.8-flash` | `medium` | `plan` | `{}` | 极速代码库检索、依赖梳理、日志定位、文档整理，节省主指挥上下文 |
+| `reviewer` | 代码审查官 | 否（按需开启） | `codex/auto/gpt-6.2-astra` | `xhigh` | `auto` | `{ "service_tier": "default" }` | 深度 Code Review、架构风险/边界条件/安全审计，只审查提意见不改代码 |
+| `qa` | 测试与验收 | 否（按需开启） | `codex/auto/gpt-6.2-sol` | `xhigh` | `full-access` | `{ "service_tier": "default" }` | 编写单元/集成/E2E 测试、复现 Bug、跑回归验证 |
+| `explorer` | 代码库侦察员 | 否（按需开启） | `antigravity/gemini-4-hydrogen` | `medium` | `plan` | `{}` | 极速代码库检索、依赖梳理、日志定位、文档整理，节省主指挥上下文 |
 
 ---
 
@@ -169,8 +166,9 @@
    - 团队模板管理：切换默认模板、编辑「指挥不直接改代码」开关与自定义指挥补充指令。
    - 成员列表管理：启用/停用角色、新增/删除自定义角色、从 host 实时目录选择 Provider / Model / Thinking / Mode / Codex Speed (`service_tier`)、编辑职责描述。
    - **注入指令实时预览**：可折叠查看最终注入给指挥的 `appendSystemPrompt` 原文。
-3. **团队状态工作区/Agent 面板 (`client.addAgentPanel` / `client.addWorkspacePanel`) + Composer Pill (`client.addComposerPill`)**：
+3. **团队状态工作区/Agent 面板 (`client.addAgentPanel` / `client.addWorkspacePanel`)**：
    - 在当前会话显示团队成员名册、已派发子智能体的实时状态、一键跳转到对应子智能体或打开团队设置。
+   - 输入框上方沿用 Paseo 原生 Subagents 胶囊结构，团队状态通过原生子智能体轨道和团队面板展示。
 4. **快捷入口**：
    - Slash 命令 `/team`（支持 `/team` 打开面板、`/team on`、`/team off`、`/team settings`）。
    - Command Center (`⌘K`) 入口：打开团队管理设置、切换当前会话团队模式、打开团队面板。
@@ -183,6 +181,6 @@
 - [ ] `npm test` 单元测试全绿（覆盖 prompt 生成、顶层/子智能体判定、排除目录/metadata 优先级、配置校验与默认值、工具返回结构）。
 - [ ] `rg -n "document\.|window\.|localStorage|navigator\.|<[a-z]+[ >]|className=|onClick=" client/` 无任何违规命中。
 - [ ] 本地路径安装到本机 Paseo daemon：`paseo plugin install /Users/kogeki/dev/paseo-team-manager`，`paseo plugin ls` 显示 `paseo-team-manager` 状态为 `running` 且无报错。
-- [ ] 实测验证：新开一个顶层会话，确认指挥在无人工提示下即可明确知道自己的指挥身份（不改代码）以及后端（Codex `auto/gpt-6.2-sol` high Normal full-access）与前端（Antigravity `gemini-4-neon` high full-access）的准确配置，并能调用 `team_get_roster`；同时确认创建出的子智能体不会误注入指挥指令，而是获得角色专属指令。
+- [ ] 实测验证：新开一个顶层会话，确认指挥在无人工提示下即可明确知道自己的指挥身份（不改代码）以及后端（Codex `auto/gpt-6.2-sol` xhigh、`service_tier: default`、full-access）与前端（Antigravity `gemini-4-neon` high、full-access）的准确配置，并能调用 `team_get_roster`；同时确认创建出的子智能体不会误注入指挥指令，而是获得角色专属指令。
 - [ ] 完整撰写 `OVERVIEW.md` 与 `OVERVIEW.zh-CN.md`（遵循 Paseo 官方 listing 规范）。
 - [ ] 不重启 Paseo daemon。
