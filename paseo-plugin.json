@@ -1,8 +1,12 @@
 {
   "id": "paseo-team-manager",
+  "icon": "assets/icon.png",
   "name": "Paseo Team Manager",
   "description": "Automatically equips top-level Paseo commander sessions with team roster instructions, role-based subagent presets, and composer/settings controls.",
-  "media": [],
+  "media": [
+    "assets/preview-settings.png",
+    "assets/preview-panel.png"
+  ],
   "requirements": {
     "paseo": ">=0.17.1"
   },

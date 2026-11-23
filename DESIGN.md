@@ -4,13 +4,13 @@
 
 让 Paseo 新开的顶层对话（「指挥 / Commander」）**自动知道**自己需要统筹当前工作区项目、如何组建并调度子智能体团队，同时坚持**指挥只负责规划、拆解、派发与验收，不直接修改业务代码**。
 
-本插件面向 Paseo `>=0.17.1`（本机实测 `0.17.1`，Desktop-managed Mac Host `srv_uVuz1npD7oh0`），需要同时兼容桌面端、Web 与移动端（iOS/Android）及明暗主题、中英文界面。
+本插件面向 Paseo `>=0.17.1`，需要同时兼容桌面端、Web 与移动端（iOS/Android）及明暗主题、中英文界面。
 
 ---
 
 ## 2. 已验证的 Paseo 0.17.1 技术可行性与关键约束
 
-以下结论均已针对 `/Users/kogeki/dev/paseo` 源码与本机 CLI 实测验证：
+以下结论均已针对 Paseo 源码与 CLI 验证：
 
 1. **所有已启用 Provider 均原生支持 `agent.open.before` 的 `appendSystemPrompt`**：
    - **Antigravity (`agy 1.5.14`)**：实测 `agy acp --disable-telemetry` 的 `initialize` 响应明确返回 `_meta.antigravity.systemPrompt.append: true`；Paseo 内置 `plugins/antigravity-provider/server/provider.ts` 会将组合后的 `systemPrompt`（含 `appendSystemPrompt`）透传给 Antigravity ACP。
@@ -112,7 +112,7 @@
   - 使用 `defineSettings`（`scope: "host"`, `version: 1`）+ Zod schema 定义持久化配置：
     - `enabled`: 全局是否启用团队指挥模式（默认 `true`）
     - `autoApplyToNewTopLevelAgents`: 是否对新开的顶层会话自动注入（默认 `true`）
-    - `excludedDirectories`: 排除目录列表（如 `/Users/kogeki/Downloads` 默认可配置跳过，避免闲聊目录也被当成开发项目，默认可留空或提供快捷排除提示，按设置开关决定）
+    - `excludedDirectories`: 排除目录列表（如 `~/Downloads` 默认可配置跳过，避免闲聊目录也被当成开发项目，默认可留空或提供快捷排除提示，按设置开关决定）
     - `defaultPresetId`: 当前默认团队模板 ID
     - `presets`: 团队模板数组，每个模板包含：
       - `id`, `name`, `description`
@@ -162,7 +162,7 @@
    - 新开对话时默认按设置自动生效，用户也可在发消息前一键切换模板或临时关闭（比如在 Downloads 随手聊个问题时顺手关掉）。
 2. **设置页面 (`client.addSettingsScreen`)**：
    - 全局总开关 & 新顶层会话默认启用开关。
-   - 排除目录管理（例如一键添加 `/Users/kogeki/Downloads` 排除，避免非项目目录触发指挥模式）。
+   - 排除目录管理（例如一键添加 `~/Downloads` 排除，避免非项目目录触发指挥模式）。
    - 团队模板管理：切换默认模板、编辑「指挥不直接改代码」开关与自定义指挥补充指令。
    - 成员列表管理：启用/停用角色、新增/删除自定义角色、从 host 实时目录选择 Provider / Model / Thinking / Mode / Codex Speed (`service_tier`)、编辑职责描述。
    - **注入指令实时预览**：可折叠查看最终注入给指挥的 `appendSystemPrompt` 原文。
@@ -180,7 +180,7 @@
 - [ ] `npm run typecheck` 零错误。
 - [ ] `npm test` 单元测试全绿（覆盖 prompt 生成、顶层/子智能体判定、排除目录/metadata 优先级、配置校验与默认值、工具返回结构）。
 - [ ] `rg -n "document\.|window\.|localStorage|navigator\.|<[a-z]+[ >]|className=|onClick=" client/` 无任何违规命中。
-- [ ] 本地路径安装到本机 Paseo daemon：`paseo plugin install /Users/kogeki/dev/paseo-team-manager`，`paseo plugin ls` 显示 `paseo-team-manager` 状态为 `running` 且无报错。
+- [ ] 本地路径安装到 Paseo daemon：`paseo plugin install /path/to/paseo-team-manager`，`paseo plugin ls` 显示 `paseo-team-manager` 状态为 `running` 且无报错。
 - [ ] 实测验证：新开一个顶层会话，确认指挥在无人工提示下即可明确知道自己的指挥身份（不改代码）以及后端（Codex `auto/gpt-6.2-sol` xhigh、`service_tier: default`、full-access）与前端（Antigravity `gemini-4-neon` high、full-access）的准确配置，并能调用 `team_get_roster`；同时确认创建出的子智能体不会误注入指挥指令，而是获得角色专属指令。
 - [ ] 完整撰写 `OVERVIEW.md` 与 `OVERVIEW.zh-CN.md`（遵循 Paseo 官方 listing 规范）。
 - [ ] 不重启 Paseo daemon。

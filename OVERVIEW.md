@@ -34,6 +34,8 @@ The built-in full-stack preset includes two enabled core roles and three optiona
 
 ## Data handling and limits
 
-All settings, provider catalog lookups, and workspace agent queries stay local between the Paseo client and its connected daemon host. The plugin does not send prompts, repository contents, or metadata to external services.
+The plugin does not make network requests to third-party services. Settings, host provider catalog lookups, and workspace agent queries stay local between the Paseo client and its connected daemon host.
+
+When team mode is active for a session, the commander or role instructions appended by the plugin, along with workspace roster and subagent summaries returned when the commander calls `team_get_roster`, are sent to the session's configured agent provider as part of normal conversation context.
 
 Changes to plugin settings or session metadata take effect when a session opens or reopens. Existing idle sessions are marked stale and reopen on the next prompt, or can be reopened immediately from the Team Status panel. Running turns are not interrupted automatically.

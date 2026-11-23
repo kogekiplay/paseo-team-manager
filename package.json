@@ -1,12 +1,18 @@
 {
   "name": "paseo-team-manager",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kogekiplay/paseo-team-manager.git"
+  },
   "type": "module",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
     "OVERVIEW.*.md",
+    "assets/",
     "index.client.ts",
     "index.client.tsx",
     "index.server.ts",
