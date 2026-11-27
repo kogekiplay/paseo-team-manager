@@ -9,6 +9,7 @@ export const METADATA_KEYS = {
   teamEnabled: "paseo-team-manager.enabled",
   presetId: "paseo-team-manager.presetId",
   roleId: "paseo-team-manager.role",
+  memberOverrides: "paseo-team-manager.memberOverrides",
 } as const;
 export const LABEL_KEYS = {
   role: "paseo-team-manager.role",
@@ -16,9 +17,22 @@ export const LABEL_KEYS = {
 } as const;
 
 export const FeatureValueSchema = z.union([z.string(), z.boolean(), z.number()]);
+export const SessionMemberOverrideSchema = z.object({
+  provider: z.string().trim().min(1).max(64),
+  model: z.string().trim().max(128).default(""),
+  thinkingOptionId: z.string().trim().max(64).optional(),
+  features: z.record(z.string(), FeatureValueSchema).optional(),
+  updatedAt: z.string().trim().max(64).optional(),
+}).refine((override) => override.provider === AUTO_PROVIDER || override.model.length > 0, {
+  message: "Model is required when provider is not auto",
+  path: ["model"],
+});
+const roleIdSchema = z.string().trim().min(1).max(48).regex(/^[a-z0-9][a-z0-9_-]*$/i);
+export const SessionMemberOverridesMapSchema = z.record(roleIdSchema, SessionMemberOverrideSchema);
+
 export const TeamMemberSchema = z.object({
   id: z.string().trim().min(1).max(64),
-  roleId: z.string().trim().min(1).max(48).regex(/^[a-z0-9][a-z0-9_-]*$/i),
+  roleId: roleIdSchema,
   name: z.string().trim().min(1).max(80),
   enabled: z.boolean().default(true),
   provider: z.string().trim().min(1).max(64),
@@ -56,10 +70,49 @@ export const teamSettingsSchema = z.object({
 });
 
 export type FeatureValue = z.infer<typeof FeatureValueSchema>;
+export type SessionMemberOverride = z.infer<typeof SessionMemberOverrideSchema>;
+export type SessionMemberOverridesMap = z.infer<typeof SessionMemberOverridesMapSchema>;
 export type TeamMember = z.infer<typeof TeamMemberSchema>;
 export type TeamPreset = z.infer<typeof TeamPresetSchema>;
 export type WorkspaceOverride = z.infer<typeof WorkspaceOverrideSchema>;
 export type TeamSettingsValues = z.infer<typeof teamSettingsSchema>;
+
+export function parseSessionMemberOverrides(
+  metadata?: Readonly<Record<string, unknown>> | null,
+): SessionMemberOverridesMap {
+  const raw = metadata?.[METADATA_KEYS.memberOverrides];
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).flatMap(([key, value]) => {
+    const roleId = roleIdSchema.safeParse(key);
+    const override = SessionMemberOverrideSchema.safeParse(value);
+    return roleId.success && override.success ? [[roleId.data.toLowerCase(), override.data]] : [];
+  }));
+}
+
+export function applySessionMemberOverridesToPreset(
+  preset: TeamPreset,
+  overrides: SessionMemberOverridesMap,
+): TeamPreset {
+  if (Object.keys(overrides).length === 0) return preset;
+  return {
+    ...preset,
+    members: preset.members.map((member) => {
+      const roleId = member.roleId.toLowerCase();
+      if (!Object.hasOwn(overrides, roleId)) return member;
+      const override = overrides[roleId];
+      const automatic = override.provider === AUTO_PROVIDER;
+      const sameProvider = !automatic && override.provider.trim().toLowerCase() === member.provider.trim().toLowerCase();
+      return {
+        ...member,
+        provider: override.provider,
+        model: automatic ? "" : override.model,
+        thinkingOptionId: override.thinkingOptionId ?? (sameProvider ? member.thinkingOptionId : ""),
+        modeId: sameProvider ? member.modeId : "",
+        features: { ...(override.features ?? (sameProvider ? member.features : {})) },
+      };
+    }),
+  };
+}
 
 export function createDefaultPresets(): TeamPreset[] {
   return [TeamPresetSchema.parse({

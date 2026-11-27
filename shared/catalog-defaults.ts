@@ -12,6 +12,7 @@ import type {
 } from "./contracts.ts";
 
 export type MemberResolutionStatus = "explicit" | "auto-matched" | "fallback-host" | "fallback-caller" | "unresolved";
+export { evaluateSubagentSync } from "./team-sync.ts";
 
 export interface ResolvedTeamMember {
   member: TeamMember;
@@ -170,7 +171,7 @@ export function resolveTeamMember(
   if (providers.length === 0) return { member, configured: member, status: "explicit", fallbackReason: null };
   const entry = providers.find((candidate) => candidate.provider === member.provider);
   const ready = entry?.enabled && entry.status === "ready";
-  if (ready && (selectableModels(entry).length === 0 || selectableModels(entry).some((model) => model.id === member.model))) {
+  if (ready && (entry.models.length === 0 || selectableModels(entry).some((model) => model.id === member.model))) {
     return { member, configured: member, status: "explicit", fallbackReason: null };
   }
   const sameProvider = ready && entry ? resolveRoleFromCatalog(member.roleId, [entry], options) : null;
@@ -208,7 +209,7 @@ export function resolvePresetMembers(
   return { preset, resolved: preset.members.map((member) => resolveTeamMember(member, providers, fallbackProvider)) };
 }
 
-export function summarizeResolvedMember(resolved: ResolvedTeamMember): ResolvedMemberSummary {
+export function summarizeResolvedMember(resolved: ResolvedTeamMember, overriddenInSession = false): ResolvedMemberSummary {
   return {
     memberId: resolved.configured.id,
     roleId: resolved.configured.roleId,
@@ -221,5 +222,6 @@ export function summarizeResolvedMember(resolved: ResolvedTeamMember): ResolvedM
     modeId: resolved.member.modeId,
     features: resolved.member.features,
     fallbackReason: resolved.fallbackReason,
+    overriddenInSession,
   };
 }

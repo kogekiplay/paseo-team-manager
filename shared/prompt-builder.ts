@@ -1,5 +1,5 @@
 import type { ResolvedTeamMember } from "./catalog-defaults.ts";
-import { AUTO_PROVIDER, LABEL_KEYS, formatProviderModel, type TeamMember, type TeamPreset } from "./settings.ts";
+import { AUTO_PROVIDER, LABEL_KEYS, formatProviderModel, type SessionMemberOverridesMap, type TeamMember, type TeamPreset } from "./settings.ts";
 
 export function buildMemberCreateAgentParams(member: TeamMember, presetId: string) {
   const { modeId, thinkingOptionId, features, roleId } = member;
@@ -17,11 +17,12 @@ export function buildMemberCreateAgentParams(member: TeamMember, presetId: strin
   };
 }
 
-export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers }: {
+export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers, sessionMemberOverrides = {} }: {
   preset: TeamPreset;
   cwd?: string | null;
   workspaceId?: string | null;
   resolvedMembers?: readonly ResolvedTeamMember[];
+  sessionMemberOverrides?: SessionMemberOverridesMap;
 }): string {
   const lines = [
     "## 当前工作区项目指挥（Commander）",
@@ -56,6 +57,9 @@ export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers
     lines.push("", `#### ${member.name}（\`${member.roleId}\`）`);
     if (member.responsibilities.trim()) lines.push("", member.responsibilities.trim());
     if (resolved.fallbackReason) lines.push("", `> 配置解析状态：${resolved.status}。${resolved.fallbackReason}`);
+    if (Object.hasOwn(sessionMemberOverrides, member.roleId.toLowerCase())) {
+      lines.push("", "> 当前会话模型覆盖已生效（优先级高于默认预设）。");
+    }
     lines.push("", "```json", JSON.stringify(params, null, 2), "```");
   }
 
@@ -64,7 +68,8 @@ export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers
     lines.push("", "### 可选扩展角色", "", "以下角色默认未启用，可按需或经用户要求调用。");
     for (const member of optional) {
       const description = member.responsibilities.trim();
-      lines.push(`- ${member.name}（\`${member.roleId}\`）${description ? ` · ${description}` : ""}`);
+      const override = Object.hasOwn(sessionMemberOverrides, member.roleId.toLowerCase()) ? " · 当前会话模型覆盖已生效" : "";
+      lines.push(`- ${member.name}（\`${member.roleId}\`）${description ? ` · ${description}` : ""}${override}`);
     }
   }
 
@@ -72,10 +77,11 @@ export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers
     "", "### 调度与协作", "",
     "1. 通过 Paseo 原生 MCP 工具 `create_agent` / `send_agent_prompt` 调度子智能体，保留 Subagents 轨道和完成唤醒机制。创建时将示例 `title` 和 `initialPrompt` 替换为实际任务标题与指令。",
     `2. 调用 \`create_agent\` 时务必传入 \`labels: { "${LABEL_KEYS.role}": "<roleId>", "${LABEL_KEYS.preset}": "${preset.id}" }\`，建议用 \`[<roleId>] \` 开头的标题，例如 \`[backend] 实现接口\`。`,
-    "3. 新建子智能体前调用只读工具 `team_get_roster` 查看最新配置和当前工作区的团队子智能体。同一角色已有健康存活的子智能体时，优先通过 `send_agent_prompt` 复用。",
+    "3. 每次派发或复用前调用只读工具 `team_get_roster`，以实时名册为准，本段示例是会话打开时的快照。优先复用本指挥已有的同角色健康子智能体，有多个时优先选 `in-sync` 的会话。若 `syncStatus` 为 `update-in-place`，先使用返回的参数调用原生 `update_agent`，再用 `send_agent_prompt` 派发。仅当没有可复用的目标提供方会话且状态为 `replace-provider` 时，按返回配置新建替代子智能体，交接上下文摘要并保留旧会话，除非用户明确要求归档。若 Paseo 要求为目标提供方显式设置权限模式，请先让用户选择。",
     "4. 多成员并行修改代码时，先划清各自可写文件边界，必要时使用独立 worktree。",
     "5. 派发时设置 `notifyOnFinish: true`，等待完成回调唤醒，避免循环轮询。",
     "6. 严格按照名册中的 `provider/model` 派发，禁止擅自升级或切换为 `astra`、`fable` 等高成本模型，除非用户明确要求。",
+    "7. 用户要求更新或重置成员模型时，直接调用 `team_update_member_model` 写入当前指挥会话覆盖，随后按返回的同步计划处理同角色子智能体。覆盖在重开会话后继续生效，全局预设和现有会话权限保持原样。用户要求按最新配置同步成员模型时，调用 `team_get_roster` 并执行其同步计划。",
   );
 
   const extraInstructions = preset.commanderExtraInstructions.trim();

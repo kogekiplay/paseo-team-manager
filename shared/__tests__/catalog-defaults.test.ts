@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { findSvgIconProblem } from "@getpaseo/plugin";
-import { resolvePresetMembers, resolveRoleFromCatalog, resolveTeamMember } from "../catalog-defaults.ts";
+import { evaluateSubagentSync, resolvePresetMembers, resolveRoleFromCatalog, resolveTeamMember } from "../catalog-defaults.ts";
 import { TEAM_MANAGER_ICON } from "../icon.ts";
 import { createDefaultPresets } from "../settings.ts";
 import type { ProviderCatalogEntry } from "../contracts.ts";
@@ -49,6 +49,52 @@ const claude = catalogEntry("claude", [
   { id: "claude-sonnet", label: "Sonnet", isDefault: true, thinkingOptions: [thinking("high", true), thinking("medium")] },
   { id: "claude-haiku", label: "Haiku", thinkingOptions: [thinking("low", true)] },
 ], { modes: [{ id: "default", label: "Default" }, { id: "bypassPermissions", label: "Bypass" }, { id: "plan", label: "Plan" }] });
+
+test("sync plans preserve context and include only changed settings for the same provider", () => {
+  const preset = createDefaultPresets()[0];
+  const configured = {
+    ...preset.members[0], provider: "codex", model: "gpt-5.4", thinkingOptionId: "high",
+    modeId: "full-access", features: { service_tier: "default", trace: true },
+  };
+  const target = resolveTeamMember(configured, [codex]);
+  const agent = {
+    agentId: "child", roleId: "backend", provider: "CODEX", model: "auto/gpt-6.2-sol", thinkingOptionId: "xhigh",
+    options: { service_tier: "priority", trace: true },
+  };
+  const drift = evaluateSubagentSync(agent, target, preset.id);
+  assert.equal(drift.syncStatus, "update-in-place");
+  assert.equal(drift.targetProviderModel, "codex/gpt-5.4");
+  assert.match(drift.syncReason ?? "", /model.*thinkingOptionId.*features/);
+  assert.deepEqual(drift.updateAgentParams, {
+    agentId: "child", settings: { model: "gpt-5.4", thinkingOptionId: "high", features: { service_tier: "default" } },
+  });
+  assert.equal(drift.createAgentParams, null);
+  const matching = { ...agent, model: "gpt-5.4", thinkingOptionId: "high" };
+  for (const options of [undefined, null, { service_tier: "default", trace: true }]) {
+    assert.deepEqual(evaluateSubagentSync({ ...matching, options }, target, preset.id), {
+      syncStatus: "in-sync", syncReason: null, targetProviderModel: "codex/gpt-5.4", updateAgentParams: null, createAgentParams: null,
+    });
+  }
+});
+
+test("a sync plan suggests a replacement for a different provider and handles unresolved roles", () => {
+  const preset = createDefaultPresets()[0];
+  const agent = { agentId: "child", roleId: "frontend", provider: "claude", model: "claude-sonnet", thinkingOptionId: null };
+  const target = resolveTeamMember(preset.members[1], [codex, antigravity]);
+  const replacement = evaluateSubagentSync(agent, target, preset.id);
+  assert.equal(replacement.syncStatus, "replace-provider");
+  assert.match(replacement.syncReason ?? "", /交接上下文摘要.*保留旧会话/);
+  assert.equal(replacement.updateAgentParams, null);
+  assert.deepEqual(replacement.createAgentParams?.settings, { thinkingOptionId: "high" });
+  assert.equal(replacement.createAgentParams?.provider, "antigravity/gemini-4-neon");
+  for (const unresolved of [undefined, resolveTeamMember(preset.members[1], [])]) {
+    const plan = evaluateSubagentSync(agent, unresolved, preset.id);
+    assert.equal(plan.syncStatus, "unresolved");
+    assert.equal(plan.targetProviderModel, null);
+    assert.equal(plan.updateAgentParams, null);
+    assert.equal(plan.createAgentParams, null);
+  }
+});
 
 test("the brand icon is a valid self-contained inline SVG", () => {
   assert.equal(findSvgIconProblem(TEAM_MANAGER_ICON.svg), null);

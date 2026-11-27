@@ -6,7 +6,7 @@ Paseo Team Manager is a Paseo plugin (`>=0.17.1`) that equips top-level project 
 
 - **Automatic Commander instructions**: New top-level sessions receive structured project coordination instructions, workspace context, active member presets, and ready-to-copy `create_agent` parameters.
 - **Direct-edit boundary**: The default Commander policy forbids direct changes to project business source files. The Commander researches, plans, delegates, reviews diffs, validates tests, and reports results.
-- **Read-only roster tool**: `team_get_roster` shows the active preset, complete member parameters, and live team subagents for the current workspace. It helps the Commander reuse healthy role sessions.
+- **Live roster and sync plans**: `team_get_roster` shows the active preset, current model assignments, and drift for the Commander's own live role sessions.
 - **Native Paseo collaboration**: The Commander uses Paseo's native `create_agent` and `send_agent_prompt` tools, with `notifyOnFinish` to preserve completion wakeups and the native Subagents track.
 - **Role isolation and configuration fallback**: Role labels and metadata receive member-specific defaults for model, mode, thinking level, and provider options. Child sessions receive only their role instructions and do not receive Commander instructions.
 - **Cross-platform controls**: A sidebar entry, settings screen, live host provider and model catalog, Composer team selector, `/team` shortcuts, and a `⌘K` Command Center entry provide configuration and status access.
@@ -29,6 +29,14 @@ The default preset stores `provider: "auto"` and resolves each role against the 
 Auto-match and cross-provider fallback leave the session permission mode unset so the session inherits Paseo's defaults. The plugin applies a preset permission mode only when you explicitly select it for the provider that will run the agent.
 
 The global team switch is a hard gate. When it is disabled, session metadata and workspace overrides cannot enable team behavior. Creation defaults apply only when team mode is enabled for the current directory or workspace and the new agent explicitly carries the team role metadata.
+
+## Changing models in an existing Commander session
+
+In v0.3.0, ask a Commander to change a member's model, for example “Switch backend to `codex/auto/gpt-6.2-sol`.” The Commander uses `team_update_member_model` to save the override in that session. Reopening the session keeps the override. The global preset and other sessions keep their own settings. Ask to reset one role or restore all member defaults to clear the corresponding overrides.
+
+The Commander checks the live roster before assigning work. For the same provider, it uses native `update_agent` to apply changes to the model, thinking level, or supported options while preserving the subagent's context. If the provider changes and the Commander has no reusable session on the target provider, it creates a replacement, hands off a context summary, and keeps the original session available. Archiving requires an explicit user request.
+
+Model updates preserve existing session permission modes. A new agent can inherit an explicitly configured preset mode only when the override keeps that preset's provider. Auto and cross-provider overrides leave the new session's mode to Paseo. If Paseo requires an explicit mode to create the replacement, the user chooses it for the target provider.
 
 ## Installation
 

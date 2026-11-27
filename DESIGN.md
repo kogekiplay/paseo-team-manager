@@ -29,8 +29,8 @@
      - **主链路必须让指挥使用 Paseo 原生 MCP 工具 `create_agent` / `send_agent_prompt`** 建小弟与派发任务（从而完整复用原生 `notifyOnFinish`、Subagents 轨道、消息队列 `steer`/`interrupt`）。
      - 插件在 `agent.open.before` 中：
        1. 向指挥注入清晰、精确的团队编排 `appendSystemPrompt`（含精确的 `provider`、`settings.modeId`、`settings.thinkingOptionId`、`settings.features` 与 `labels` 模板）。
-       2. 向指挥挂载只读查询工具（如 `team_get_roster` / `team_list_members`），便于指挥随时查询最新团队配置与当前工作区已创建的团队小弟，避免重复创建或配置漂移。
-       3. 通过 `agent.create.before` 可选地根据 `labels["paseo-team-manager.role"]` 兜底校验/补齐该角色的 `providerOptions`（例如确保 Codex 后端固定为 `service_tier: "default"`）与 `metadata`，防止指挥偶发漏传参数。
+       2. 向指挥挂载 `team_get_roster` 和 `team_update_member_model`，分别用于查询实时名册与同步计划，以及按用户要求保存当前指挥会话的成员模型覆盖。
+       3. 通过 `agent.create.before`，在启用范围内根据新会话自身的显式角色 metadata 补齐缺省参数。父会话的覆盖由指挥从实时名册读取，并通过原生 `create_agent` 参数传递。
        4. 在 `agent.open.before` 中识别到子智能体带有 `paseo-team-manager.role` 标签时，自动追加该角色的专属开发规范与回报格式。
 4. **插件热更新与防卡死约束**：
    - 在 `agent.open.before` 中**禁止** `await` 对当前正在打开的 agent 执行 `setMetadata` / `setLabels` / 修改配置（会导致死锁超时）；如需写入必须 fire-and-forget（`void ...catch(...)`）。
@@ -83,7 +83,7 @@
 - **红线（可配置）**：**指挥默认不直接修改项目业务代码**（允许只读检查、查看 diff/日志、跑只读诊断或验收命令），所有代码编写与修改交由对应小弟完成。
 - **协作约定**：
   - 建小弟时必须传入 `labels: { "paseo-team-manager.role": "<roleId>" }`，方便插件识别角色与追踪状态。
-  - 若同一角色在当前工作区已有存活的子智能体，优先用 `send_agent_prompt` 复用，不盲目重复开新会话。
+  - 派发前查询 `team_get_roster`。若本指挥已有同角色健康子智能体，先按同步计划处理配置差异，再用 `send_agent_prompt` 复用。
   - 若任务并行且存在文件写冲突，可为子智能体规划清晰的文件边界或按需使用独立 worktree。
 
 ### 4.2 默认核心启用成员
@@ -125,13 +125,14 @@
       - `teamEnabled`: `"paseo-team-manager.enabled"`（`boolean`，单会话显式覆盖）
       - `presetId`: `"paseo-team-manager.presetId"`（`string`，单会话显式指定模板）
       - `roleId`: `"paseo-team-manager.role"`（`string`，子智能体角色标识）
+      - `memberOverrides`: `"paseo-team-manager.memberOverrides"`（指挥会话的角色模型覆盖，按小写 `roleId` 存储）
     - `LABEL_KEYS`:
       - `role`: `"paseo-team-manager.role"`
       - `preset`: `"paseo-team-manager.preset"`
 - `shared/contracts.ts`：
   - 插件 RPC 契约（`defineRpc`）：
     - `getProviderCatalogRpc`：读取当前 host 可用 providers / models / modes / features，供设置页下拉选择，避免手写 model ID。
-    - `getWorkspaceTeamStateRpc`：查询指定工作区的有效预设、指挥状态与已创建的团队子智能体列表。
+    - `getWorkspaceTeamStateRpc`：查询指定工作区的有效预设、当前指挥会话的覆盖以及现有团队子智能体的同步状态。
     - `previewCommanderPromptRpc`：实时预览当前配置会注入给指挥的完整系统指令，方便用户调试。
 - `shared/prompt-builder.ts`：
   - 纯函数，生成：
@@ -151,9 +152,19 @@
   - 判断是否为子智能体：`Boolean(request.labels["paseo.parent-agent-id"])`。
     - **若是子智能体**：读取 `request.labels["paseo-team-manager.role"]` 或 `request.metadata["paseo-team-manager.role"]`，若匹配到角色则追加角色专属 `appendSystemPrompt`。
     - **若是顶层指挥**：全局 `enabled: false` 是硬总闸。全局开启时再按优先级计算生效状态（会话 `metadata["paseo-team-manager.enabled"]` > 工作区/目录覆盖 > 排除目录规则 > 全局 `autoApplyToNewTopLevelAgents`）。
-      - 若生效：追加指挥团队编排 `appendSystemPrompt`，并挂载只读 Agent Tool：
-        - `team_get_roster`：返回当前生效预设、所有启用/可选成员的精确 `create_agent` 参数、以及当前工作区已存在的团队子智能体列表（ID、标题、角色、状态）。
+      - 若生效，追加指挥团队编排 `appendSystemPrompt` 并挂载两个工具。
+        - `team_get_roster` 返回生效预设、成员创建参数、会话覆盖标记和工作区存活子智能体。同步计划仅针对当前指挥的子智能体。
+        - `team_update_member_model` 根据用户要求更新一个角色，或清除一个或全部角色的会话覆盖。覆盖保存到当前指挥的 metadata，重开会话后继续生效。全局预设和其他会话保留各自设置。
 - 注册 RPC handlers（`getProviderCatalogRpc`、`getWorkspaceTeamStateRpc`、`previewCommanderPromptRpc`）。
+
+#### v0.3.0 子智能体同步
+
+- `in-sync` 表示现有模型、思考等级及可比较的目标特性已经匹配。
+- `update-in-place` 返回原生 `update_agent` 参数。指挥仅同步有差异的模型、思考等级和特性，保留会话上下文和当前权限模式。
+- `replace-provider` 返回原生 `create_agent` 参数。没有可复用的目标提供方会话时，指挥新建替代会话并交接摘要，保留旧会话。归档须经用户明确要求。
+- `unresolved` 表示当前角色没有可用的目标配置，需要先确认模型再同步。
+
+更新工具的输入仅允许模型、提供方、思考等级、特性和重置选项。覆盖仍使用基础预设的显式提供方时，新建参数可以继承该提供方的预设模式。覆盖改用其他提供方或 Auto 时，新会话权限由 Paseo 处理。若宿主要求显式权限模式，由用户为目标提供方选择。
 
 ### 5.3 客户端（`index.client.tsx` + `client/`）
 

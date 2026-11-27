@@ -5,11 +5,61 @@ import {
   normalizeDirectoryPath, resolveEffectiveTeamConfig, resolveSubagentRoleId, resolveWorkspaceOverride,
 } from "../policy.ts";
 import {
-  createDefaultPresets, DEFAULT_TEAM_SETTINGS, formatProviderModel, LABEL_KEYS, METADATA_KEYS,
-  PARENT_AGENT_ID_LABEL, parseTeamSettings, teamSettings, TeamMemberSchema, TeamPresetSchema,
+  applySessionMemberOverridesToPreset, createDefaultPresets, DEFAULT_TEAM_SETTINGS, formatProviderModel, LABEL_KEYS, METADATA_KEYS,
+  PARENT_AGENT_ID_LABEL, parseSessionMemberOverrides, parseTeamSettings, teamSettings, TeamMemberSchema, TeamPresetSchema,
 } from "../settings.ts";
 
 const homeDir = "/Users/tester";
+
+test("session override parsing normalizes roles and discards malformed entries and permission fields", () => {
+  const metadata = {
+    [METADATA_KEYS.memberOverrides]: {
+      " Backend ": { provider: "codex", model: " gpt-5.4 ", modeId: "full-access", features: { trace: true } },
+      FrontEnd: { provider: "auto" },
+      qa: { provider: "codex" },
+      explorer: { provider: "auto", features: { invalid: null } },
+      reviewer: null,
+      "invalid role": { provider: "auto" },
+    },
+  };
+  assert.deepEqual(parseSessionMemberOverrides(metadata), {
+    backend: { provider: "codex", model: "gpt-5.4", features: { trace: true } },
+    frontend: { provider: "auto", model: "" },
+  });
+  for (const raw of [undefined, null, [], false, "broken"]) {
+    assert.deepEqual(parseSessionMemberOverrides({ [METADATA_KEYS.memberOverrides]: raw }), {});
+  }
+});
+
+test("a session override preserves the preset mode only for the same explicitly configured provider", () => {
+  const [base] = createDefaultPresets();
+  const backend = {
+    ...base.members[0], provider: "codex", model: "gpt-5.4", modeId: "full-access",
+    thinkingOptionId: "high", features: { service_tier: "default" },
+  };
+  const preset = { ...base, members: [backend, ...base.members.slice(1)] };
+  const same = applySessionMemberOverridesToPreset(preset, { backend: { provider: "CODEX", model: "new" } });
+  assert.deepEqual(same.members[0], { ...backend, provider: "CODEX", model: "new" });
+  assert.notEqual(same.members[0].features, backend.features);
+  assert.equal(same.members[1], preset.members[1]);
+
+  const other = applySessionMemberOverridesToPreset(preset, {
+    backend: { provider: "claude", model: "sonnet", thinkingOptionId: "medium", features: { trace: false } },
+  });
+  assert.deepEqual(other.members[0], {
+    ...backend, provider: "claude", model: "sonnet", modeId: "", thinkingOptionId: "medium", features: { trace: false },
+  });
+  const automatic = applySessionMemberOverridesToPreset(preset, { backend: { provider: "auto", model: "ignored" } });
+  assert.deepEqual(automatic.members[0], { ...backend, provider: "auto", model: "", modeId: "", thinkingOptionId: "", features: {} });
+  assert.equal(preset.members[0], backend);
+
+  const settings = parseTeamSettings({ presets: [preset] });
+  const metadata = { [METADATA_KEYS.memberOverrides]: { BACKEND: { provider: "claude", model: "sonnet" } } };
+  const effective = resolveEffectiveTeamConfig({ settings, metadata });
+  assert.deepEqual(effective.sessionMemberOverrides, { backend: { provider: "claude", model: "sonnet" } });
+  assert.deepEqual(effective.preset.members[0], { ...backend, provider: "claude", model: "sonnet", modeId: "", thinkingOptionId: "", features: {} });
+  assert.deepEqual(resolveEffectiveTeamConfig({ settings }).preset.members[0], backend);
+});
 
 test("the host setting defines the full default team and independent snapshots", () => {
   assert.equal(teamSettings.id, "team");

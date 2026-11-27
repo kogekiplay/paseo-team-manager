@@ -1,6 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { FeatureValueSchema, TeamPresetSchema } from "./settings.ts";
+import { FeatureValueSchema, SessionMemberOverridesMapSchema, TeamPresetSchema } from "./settings.ts";
 
 const providerControlFields = {
   key: z.string(),
@@ -34,6 +34,7 @@ export const ProviderCatalogModelSchema = ProviderCatalogModeSchema.extend({
   thinkingOptions: z.array(ProviderCatalogThinkingOptionSchema),
 });
 export const MemberResolutionStatusSchema = z.enum(["explicit", "auto-matched", "fallback-host", "fallback-caller", "unresolved"]);
+export const AgentSyncStatusSchema = z.enum(["in-sync", "update-in-place", "replace-provider", "unresolved"]);
 export const ResolvedMemberSummarySchema = z.object({
   memberId: z.string(),
   roleId: z.string(),
@@ -46,6 +47,7 @@ export const ResolvedMemberSummarySchema = z.object({
   modeId: z.string(),
   features: z.record(z.string(), FeatureValueSchema),
   fallbackReason: z.string().nullable(),
+  overriddenInSession: z.boolean().default(false),
 });
 export const ProviderCatalogEntrySchema = z.object({
   provider: z.string(),
@@ -75,6 +77,9 @@ export const WorkspaceTeamAgentSchema = z.object({
   isCommander: z.boolean(),
   background: z.boolean(),
   updatedAt: z.string(),
+  syncStatus: AgentSyncStatusSchema.nullable().optional(),
+  syncReason: z.string().nullable().optional(),
+  targetProviderModel: z.string().nullable().optional(),
 });
 
 export const providerCatalogInputSchema = z.object({ cwd: z.string().optional(), refresh: z.boolean().optional() });
@@ -109,6 +114,7 @@ export const workspaceTeamStateOutputSchema = z.object({
   excludedByDirectory: z.string().nullable(),
   activePresetId: z.string(),
   activePreset: TeamPresetSchema,
+  sessionMemberOverrides: SessionMemberOverridesMapSchema.default({}),
   resolvedMembers: z.array(ResolvedMemberSummarySchema),
   agents: z.array(WorkspaceTeamAgentSchema),
 });
@@ -145,6 +151,7 @@ export type ProviderCatalogThinkingOption = z.infer<typeof ProviderCatalogThinki
 export type ProviderCatalogModel = z.infer<typeof ProviderCatalogModelSchema>;
 export type ProviderCatalogEntry = z.infer<typeof ProviderCatalogEntrySchema>;
 export type MemberResolutionStatus = z.infer<typeof MemberResolutionStatusSchema>;
+export type AgentSyncStatus = z.infer<typeof AgentSyncStatusSchema>;
 export type ResolvedMemberSummary = z.infer<typeof ResolvedMemberSummarySchema>;
 export type WorkspaceTeamAgent = z.infer<typeof WorkspaceTeamAgentSchema>;
 export type ProviderCatalogInput = z.infer<typeof providerCatalogInputSchema>;

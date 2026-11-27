@@ -2,12 +2,28 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { resolvePresetMembers } from "../catalog-defaults.ts";
 import { buildCommanderPrompt, buildMemberCreateAgentParams, buildSubagentRolePrompt } from "../prompt-builder.ts";
-import { createDefaultPresets, type TeamPreset } from "../settings.ts";
+import { applySessionMemberOverridesToPreset, createDefaultPresets } from "../settings.ts";
 
 const catalog = [
   { provider: "codex", label: "Codex", enabled: true, status: "ready" as const, defaultModeId: "full-access", modes: [{ id: "full-access", label: "Full Access" }], models: [{ id: "auto/gpt-6.2-sol", label: "Sol", isDefault: true, thinkingOptions: [{ id: "xhigh", label: "XHigh", isDefault: true }] }], controls: [{ type: "select" as const, key: "service_tier", label: "Speed", choices: [{ value: "default", label: "Default" }] }] },
   { provider: "antigravity", label: "Antigravity", enabled: true, status: "ready" as const, defaultModeId: "full-access", modes: [{ id: "full-access", label: "Full Access" }], models: [{ id: "gemini-4-neon", label: "Neon", isDefault: true, thinkingOptions: [{ id: "high", label: "High", isDefault: true }] }, { id: "gemini-4-hydrogen", label: "Hydrogen", thinkingOptions: [{ id: "medium", label: "Medium", isDefault: true }] }], controls: [] },
 ];
+
+test("the commander sees the session override and uses live model sync instructions", () => {
+  const [base] = createDefaultPresets();
+  const sessionMemberOverrides = { frontend: { provider: "codex", model: "auto/gpt-6.2-sol" } };
+  const preset = applySessionMemberOverridesToPreset(base, sessionMemberOverrides);
+  const { resolved } = resolvePresetMembers(preset, catalog);
+  const prompt = buildCommanderPrompt({ preset, resolvedMembers: resolved, sessionMemberOverrides });
+  assert.match(prompt, /前端开发[\s\S]*当前会话模型覆盖已生效[\s\S]*"provider": "codex\/auto\/gpt-6\.2-sol"/);
+  assert.match(prompt, /`team_get_roster`，以实时名册为准/);
+  assert.match(prompt, /`update-in-place`.*`update_agent`.*`send_agent_prompt`/);
+  assert.match(prompt, /`replace-provider`.*交接上下文摘要并保留旧会话/);
+  assert.match(prompt, /优先选 `in-sync` 的会话.*没有可复用的目标提供方会话/);
+  assert.match(prompt, /若 Paseo 要求为目标提供方显式设置权限模式，请先让用户选择/);
+  assert.match(prompt, /`team_update_member_model`.*重开会话后继续生效/);
+  assert.doesNotMatch(prompt, /"modeId"/);
+});
 
 test("the commander gets copyable native tool parameters for enabled members", () => {
   const [preset] = createDefaultPresets();
@@ -91,5 +107,5 @@ test("the child prompt contains role duties, file boundaries and reporting", () 
   for (const text of [member.name, member.roleId, member.responsibilities, member.rolePrompt, "/tmp/repo", "文件边界", "自测", "涉及文件", "验证结果"]) {
     assert.ok(prompt.includes(text));
   }
-  assert.doesNotMatch(prompt, /Commander|team_get_roster|禁止直接修改项目业务源码文件|create_agent/);
+  assert.doesNotMatch(prompt, /Commander|team_get_roster|team_update_member_model|禁止直接修改项目业务源码文件|create_agent/);
 });

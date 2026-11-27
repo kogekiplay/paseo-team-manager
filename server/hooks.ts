@@ -51,12 +51,12 @@ export function applyAgentCreateBefore(
 export function applyAgentOpenBefore(
   request: PluginHookRequests["agent.open.before"],
   settings: TeamSettingsValues,
-  rosterTool: AgentToolDefinition,
+  commanderTools: AgentToolDefinition | readonly AgentToolDefinition[],
   homeDir: string,
   catalogProviders: readonly ProviderCatalogEntry[] = [],
 ): PluginHookRequests["agent.open.before"] | undefined {
   if (request.purpose === "history" || request.background) return;
-  const { labels, metadata, title, cwd, workspaceId } = request;
+  const { labels, metadata, cwd, workspaceId } = request;
   const effective = resolveEffectiveTeamConfig({ settings, workspaceId, cwd, metadata, labels, homeDir });
   const prompts = request.appendSystemPrompt ?? [];
 
@@ -77,7 +77,9 @@ export function applyAgentOpenBefore(
   const { resolved } = resolvePresetMembers(effective.preset, catalogProviders, request.provider);
   return {
     ...request,
-    appendSystemPrompt: [...prompts, buildCommanderPrompt({ preset: effective.preset, cwd, workspaceId, resolvedMembers: resolved })],
-    tools: [...request.tools, rosterTool],
+    appendSystemPrompt: [...prompts, buildCommanderPrompt({
+      preset: effective.preset, cwd, workspaceId, resolvedMembers: resolved, sessionMemberOverrides: effective.sessionMemberOverrides,
+    })],
+    tools: [...request.tools, ...("execute" in commanderTools ? [commanderTools] : commanderTools)],
   };
 }

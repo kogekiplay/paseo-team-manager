@@ -1,6 +1,7 @@
 import {
   LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL,
-  type TeamMember, type TeamPreset, type TeamSettingsValues, type WorkspaceOverride,
+  applySessionMemberOverridesToPreset, parseSessionMemberOverrides,
+  type SessionMemberOverridesMap, type TeamMember, type TeamPreset, type TeamSettingsValues, type WorkspaceOverride,
 } from "./settings.ts";
 
 export type EffectiveDecisionSource =
@@ -15,6 +16,7 @@ export interface EffectiveTeamConfig {
   preset: TeamPreset;
   presetId: string;
   excludedByDirectory: string | null;
+  sessionMemberOverrides: SessionMemberOverridesMap;
 }
 
 interface WorkspaceContext {
@@ -85,10 +87,12 @@ export function resolveEffectiveTeamConfig({
   const override = resolveWorkspaceOverride(settings, { workspaceId, cwd, homeDir });
   const excludedByDirectory = findMatchingExcludedDirectory(cwd, settings.excludedDirectories, homeDir);
   const presetIds = [metadata?.[METADATA_KEYS.presetId], labels?.[LABEL_KEYS.preset], override?.presetId, settings.defaultPresetId];
-  const preset = presetIds
+  const basePreset = presetIds
     .map((id) => typeof id === "string" ? settings.presets.find((item) => item.id === id.trim()) : undefined)
     .find((item) => item !== undefined) ?? settings.presets[0];
-  const selection = { preset, presetId: preset.id, excludedByDirectory };
+  const sessionMemberOverrides = parseSessionMemberOverrides(metadata);
+  const preset = applySessionMemberOverridesToPreset(basePreset, sessionMemberOverrides);
+  const selection = { preset, presetId: preset.id, excludedByDirectory, sessionMemberOverrides };
 
   if (!settings.enabled) return { ...selection, enabled: false, source: "global-default" };
 

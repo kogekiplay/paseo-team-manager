@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
 import { test } from "node:test";
-import type { PluginServerContext, PluginSettingsState } from "@getpaseo/plugin/server";
+import type { AgentToolDefinition, PluginServerContext, PluginSettingsState } from "@getpaseo/plugin/server";
 import contribute from "../../index.server.ts";
 import { getProviderCatalogRpc, getProviderControlsRpc, getWorkspaceTeamStateRpc, previewCommanderPromptRpc } from "../../shared/contracts.ts";
 import { LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL, parseTeamSettings, teamSettings } from "../../shared/settings.ts";
@@ -57,6 +57,7 @@ const snapshot: PaseoProviderSnapshotResult = {
         { provider: "codex", id: "other", label: "Other" },
         { provider: "codex", id: "auto/gpt-6.2-sol", label: "GPT-6.2 Sol", isDefault: true, defaultThinkingOptionId: "xhigh",
           thinkingOptions: [{ id: "xhigh", label: "Extra High", isDefault: true }] },
+        { provider: "codex", id: "hidden-model", label: "Hidden", isSelectable: false },
       ],
     },
     { provider: "broken", enabled: true, status: "ready", models: [{ provider: "broken", id: "model", label: "Model" }] },
@@ -127,8 +128,13 @@ test("entry registers both hooks and all RPCs, uses a racing settings update and
     agentId: "root", workspaceId: "workspace", provider: "codex", cwd, reason: "create", purpose: "interactive",
     title: null, background: false, labels: {}, metadata: {}, tools: [], env: {}, mcpServers: {},
   };
-  const openResult = await fixture.hooks.get("agent.open.before")!({ request: open }, { paseo }) as { appendSystemPrompt: string[] };
+  const openHook = fixture.hooks.get("agent.open.before")!;
+  const openResult = await openHook({ request: open }, { paseo }) as { appendSystemPrompt: string[]; tools: AgentToolDefinition[] };
   assert.match(openResult.appendSystemPrompt[0], /验证最新配置/);
+  assert.deepEqual(openResult.tools.map(({ name }) => name), ["team_get_roster", "team_update_member_model"]);
+  const childOpen = await openHook({ request: { ...open, agentId: "child", labels: childLabels } }, { paseo }) as typeof openResult;
+  assert.deepEqual(childOpen.tools, []);
+  assert.doesNotMatch(childOpen.appendSystemPrompt[0], /team_get_roster|team_update_member_model/);
   const createResult = await fixture.hooks.get("agent.create.before")!({ request: {
     config: { provider: "codex", cwd, title: "[backend] task" },
     metadata: { [METADATA_KEYS.roleId]: "backend" },
@@ -148,6 +154,7 @@ test("entry registers both hooks and all RPCs, uses a racing settings update and
   assert.equal(catalog.fetchedAt, snapshotDate);
   assert.equal(catalog.providers[0].models[1].thinkingOptions[0].id, "xhigh");
   assert.deepEqual(catalog.providers[0].models[0].thinkingOptions, []);
+  assert.equal(catalog.providers[0].models[2].isSelectable, false);
   assert.deepEqual(catalog.providers[0].modes, [{ id: "full-access", label: "Full Access", description: "Unattended mode" }]);
   assert.deepEqual(catalog.providers[0].controls, controls);
   assert.equal(catalog.providers[1].error, "Provider timed out");
@@ -172,13 +179,29 @@ test("entry registers both hooks and all RPCs, uses a racing settings update and
   ]);
   assert.equal(state.agents[1].parentAgentId, "root");
   assert.equal(state.agents[1].thinkingOptionId, "high");
+  assert.equal(state.agents[1].syncStatus, undefined);
+  const overrides = { frontend: { provider: "codex", model: "other" } };
+  const metadata = { [METADATA_KEYS.memberOverrides]: overrides };
+  entries[0] = { ...entries[0], metadata };
+  const resumed = await openHook({ request: { ...open, reason: "resume", metadata } }, { paseo }) as typeof openResult;
+  assert.match(resumed.appendSystemPrompt[0], /当前会话模型覆盖已生效[\s\S]*"provider": "codex\/other"/);
+  const updated = getWorkspaceTeamStateRpc.output.parse(await call(getWorkspaceTeamStateRpc.name, { workspaceId: "workspace", agentId: "root" }));
+  assert.deepEqual(updated.sessionMemberOverrides, overrides);
+  assert.deepEqual(updated.activePreset.members.find(({ roleId }) => roleId === "frontend")?.model, "other");
+  assert.deepEqual(updated.resolvedMembers.filter(({ overriddenInSession }) => overriddenInSession).map(({ roleId }) => roleId), ["frontend"]);
+  assert.equal(updated.agents[1].syncStatus, "update-in-place");
+  assert.equal(updated.agents[1].targetProviderModel, "codex/other");
+  assert.match(updated.agents[1].syncReason ?? "", /model/);
   const other = getWorkspaceTeamStateRpc.output.parse(await call(getWorkspaceTeamStateRpc.name, { workspaceId: "workspace", agentId: "other" }));
   assert.equal(other.decisionSource, "global-default");
+  assert.deepEqual(other.sessionMemberOverrides, {});
+  assert.equal(other.agents[1].syncStatus, undefined);
 
   const preview = previewCommanderPromptRpc.output.parse(await call(previewCommanderPromptRpc.name, { roleId: " BACKEND " }));
   assert.equal(preview.presetId, "latest");
   assert.match(preview.commanderPrompt, /验证最新配置/);
   assert.match(preview.rolePrompt ?? "", /后端开发/);
+  assert.ok(preview.resolvedMembers.every(({ overriddenInSession }) => overriddenInSession === false));
   const draft = { ...selected, id: "draft", commanderNoDirectEdit: false };
   const draftPreview = previewCommanderPromptRpc.output.parse(await call(previewCommanderPromptRpc.name, { preset: draft, presetId: "latest", roleId: "unknown" }));
   assert.equal(draftPreview.presetId, "draft");

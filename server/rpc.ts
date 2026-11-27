@@ -11,7 +11,7 @@ import { resolveEffectiveTeamConfig } from "../shared/policy.ts";
 import { buildCommanderPrompt, buildSubagentRolePrompt } from "../shared/prompt-builder.ts";
 import { FeatureValueSchema, formatProviderModel, METADATA_KEYS, type TeamSettingsValues } from "../shared/settings.ts";
 import type { createSettingsCache } from "./settings-cache.ts";
-import { listWorkspaceAgents, toWorkspaceTeamAgent } from "./tools.ts";
+import { listWorkspaceAgents, planWorkspaceAgentSync, toWorkspaceTeamAgent } from "./tools.ts";
 import type { HostPaseoApi, HostProviderControlsInput, HostProviderSnapshotResult } from "./paseo-types.ts";
 
 type PaseoApi = HostPaseoApi;
@@ -43,7 +43,8 @@ export async function fetchProviderCatalogSnapshot(
       label: entry.label ?? provider,
       error: entry.error ?? result?.error ?? undefined,
       modes: entry.modes ?? [],
-      models: (entry.models ?? []).filter((model) => model.isSelectable !== false).map((model) => ({ ...model, thinkingOptions: model.thinkingOptions ?? [] })),
+      // The editor filters non-selectable models. Retain those flags so validation can distinguish an empty catalog from a disabled model list.
+      models: (entry.models ?? []).map((model) => ({ ...model, thinkingOptions: model.thinkingOptions ?? [] })),
       controls: result?.controls ?? [],
     });
   }));
@@ -99,24 +100,33 @@ export async function handleWorkspaceTeamState(
   let agent = agents.find((item) => item.id === agentId);
   if (!agent && agentId) {
     const result = await Promise.resolve().then(() => paseo.agents.ref(agentId).refresh()).catch(() => null);
-    if (result?.agent.workspaceId === workspaceId) agent = result.agent;
+    if (result?.agent?.workspaceId === workspaceId) agent = result.agent;
   }
   const directory = cwd ?? workspace?.workspaceDirectory ?? agent?.cwd ?? agents[0]?.cwd ?? null;
   const effective = resolveEffectiveTeamConfig({
     settings, workspaceId, cwd: directory, homeDir, metadata: agent?.metadata, labels: agent?.labels,
   });
-  const { resolved } = resolvePresetMembers(effective.preset, catalogProviders, agent?.provider ?? null);
+  const { preset, presetId, enabled, sessionMemberOverrides } = effective;
+  const { resolved } = resolvePresetMembers(preset, catalogProviders, agent?.provider ?? null);
+  const commanderId = enabled && agent && toWorkspaceTeamAgent(agent).isCommander ? agent.id : null;
   return {
     workspaceId,
     cwd: directory,
     homeDir,
-    effectiveEnabled: effective.enabled,
+    effectiveEnabled: enabled,
     decisionSource: effective.source,
     excludedByDirectory: effective.excludedByDirectory,
-    activePresetId: effective.presetId,
-    activePreset: effective.preset,
-    resolvedMembers: resolved.map(summarizeResolvedMember),
-    agents: agents.map(toWorkspaceTeamAgent),
+    activePresetId: presetId,
+    activePreset: preset,
+    sessionMemberOverrides,
+    resolvedMembers: resolved.map((item) => summarizeResolvedMember(item, Object.hasOwn(sessionMemberOverrides, item.member.roleId.toLowerCase()))),
+    agents: agents.map((item) => {
+      const view = toWorkspaceTeamAgent(item);
+      const plan = commanderId ? planWorkspaceAgentSync(item, view, commanderId, resolved, presetId) : null;
+      if (!plan) return view;
+      const { syncStatus, syncReason, targetProviderModel } = plan;
+      return { ...view, syncStatus, syncReason, targetProviderModel };
+    }),
   };
 }
 
@@ -137,7 +147,7 @@ export function handlePreviewCommanderPrompt(
     presetId: preset.id,
     commanderPrompt: buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers: resolved }),
     rolePrompt: resolvedRoleMember ? buildSubagentRolePrompt({ preset, member: resolvedRoleMember.member, cwd }) : member ? buildSubagentRolePrompt({ preset, member, cwd }) : null,
-    resolvedMembers: resolved.map(summarizeResolvedMember),
+    resolvedMembers: resolved.map((item) => summarizeResolvedMember(item)),
   };
 }
 
