@@ -14,6 +14,8 @@ import {
   TeamMemberSchema,
   TeamPresetSchema,
   type FeatureValue,
+  type SessionMemberOverride,
+  type SessionMemberOverridesMap,
   type TeamMember,
   type TeamPreset,
   type TeamSettingsValues,
@@ -42,6 +44,7 @@ export type ParsedTeamSlashCommand =
   | { readonly kind: "on" }
   | { readonly kind: "off" }
   | { readonly kind: "auto" }
+  | { readonly kind: "reset-overrides" }
   | { readonly kind: "preset"; readonly presetId: Str }
   | { readonly kind: "invalid"; readonly raw: Str };
 
@@ -126,6 +129,9 @@ export function parseTeamSlashArgs(rawArgs: Str): ParsedTeamSlashCommand {
     if (head === "on") return { kind: "on" };
     if (head === "off") return { kind: "off" };
     if (head === "auto" || head === "default") return { kind: "auto" };
+    if (head === "reset-overrides" || head === "reset") {
+      return { kind: "reset-overrides" };
+    }
     return { kind: "invalid", raw: trimmed };
   }
 
@@ -571,6 +577,38 @@ export function applyResolvedFallbackToMember(
         : member,
     ),
   };
+}
+
+export function removeSessionMemberOverride(
+  overrides: SessionMemberOverridesMap,
+  roleId: Str,
+): SessionMemberOverridesMap | null {
+  const target = roleId.trim().toLowerCase();
+  const next: SessionMemberOverridesMap = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    if (key.trim().toLowerCase() === target) continue;
+    next[key] = value;
+  }
+  return Object.keys(next).length > 0 ? next : null;
+}
+
+export function formatSessionOverrideTarget(
+  override: SessionMemberOverride,
+  locale?: Str,
+): Str {
+  if (override.provider === AUTO_PROVIDER) {
+    return isChineseLocale(locale) ? "自动匹配" : AUTO_PROVIDER;
+  }
+  return formatMemberConfigSummary(
+    {
+      provider: override.provider,
+      model: override.model,
+      thinkingOptionId: override.thinkingOptionId ?? "",
+      modeId: "",
+      features: override.features ?? {},
+    },
+    locale,
+  );
 }
 
 export function updateWorkspaceOverride(

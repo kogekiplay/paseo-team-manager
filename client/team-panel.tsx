@@ -28,6 +28,7 @@ import {
   AUTO_PROVIDER,
   formatProviderModel,
   METADATA_KEYS,
+  type SessionMemberOverridesMap,
 } from "../shared/settings.ts";
 import { messages } from "./messages.ts";
 import {
@@ -38,8 +39,10 @@ import {
 import {
   formatMemberConfigSummary,
   formatMemberSummary,
+  formatSessionOverrideTarget,
   localizeModeLabel,
   localizeThinkingLabel,
+  removeSessionMemberOverride,
   updateWorkspaceOverride,
 } from "./team-state.ts";
 
@@ -47,6 +50,37 @@ type Str = string;
 type Bool = boolean;
 type NullableStr = Str | null;
 type NullableState = WorkspaceTeamStateOutput | null;
+type SerializedOverrideEntry = Record<
+  Str,
+  Str | Record<Str, Str | Bool | number>
+>;
+type SerializedOverridesMap = Record<Str, SerializedOverrideEntry>;
+
+function serializeOverridesForMetadata(
+  overrides: SessionMemberOverridesMap | null,
+): SerializedOverridesMap | null {
+  if (!overrides) return null;
+  const entries = Object.entries(overrides);
+  if (entries.length === 0) return null;
+  const result: SerializedOverridesMap = {};
+  for (const [roleId, item] of entries) {
+    const clean: SerializedOverrideEntry = {
+      provider: item.provider,
+      model: item.model,
+    };
+    if (item.thinkingOptionId !== undefined) {
+      clean.thinkingOptionId = item.thinkingOptionId;
+    }
+    if (item.features !== undefined) {
+      clean.features = { ...item.features };
+    }
+    if (item.updatedAt !== undefined) {
+      clean.updatedAt = item.updatedAt;
+    }
+    result[roleId] = clean;
+  }
+  return result;
+}
 
 interface TeamPanelViewProps {
   readonly workspaceId: Str;
@@ -249,6 +283,66 @@ function TeamPanelView({
       }
     },
     [settingsValues, workspaceId, toast, t, loadState],
+  );
+
+  const handleClearAllSessionOverrides = useCallback(async () => {
+    if (!agentId) return;
+    setBusyAction(true);
+    try {
+      await paseo.agents.ref(agentId).setMetadata({
+        [METADATA_KEYS.memberOverrides]: null,
+      });
+      toast.show(t("panel.sessionOverridesClearedToast"), {
+        variant: "success",
+      });
+      await loadState();
+    } catch (err) {
+      toast.error(
+        t("panel.actionFailedToast", {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    } finally {
+      setBusyAction(false);
+    }
+  }, [agentId, paseo, toast, t, loadState]);
+
+  const handleResetSingleSessionOverride = useCallback(
+    async (roleId: Str) => {
+      if (!agentId || !state) return;
+      setBusyAction(true);
+      try {
+        const remaining = removeSessionMemberOverride(
+          state.sessionMemberOverrides,
+          roleId,
+        );
+        await paseo.agents.ref(agentId).setMetadata({
+          [METADATA_KEYS.memberOverrides]:
+            serializeOverridesForMetadata(remaining),
+        });
+        toast.show(t("panel.sessionOverrideResetToast", { roleId }), {
+          variant: "success",
+        });
+        await loadState();
+      } catch (err) {
+        toast.error(
+          t("panel.actionFailedToast", {
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      } finally {
+        setBusyAction(false);
+      }
+    },
+    [agentId, state, paseo, toast, t, loadState],
+  );
+
+  const sessionOverrideEntries = useMemo(
+    () =>
+      Object.entries(state?.sessionMemberOverrides ?? {}).sort(([a], [b]) =>
+        a.localeCompare(b),
+      ),
+    [state?.sessionMemberOverrides],
   );
 
   const activeMembers = useMemo(
@@ -472,6 +566,20 @@ function TeamPanelView({
         },
         listGap: {
           gap: 8,
+        },
+        overrideBox: {
+          backgroundColor: theme.colors.surface2,
+          borderColor: theme.colors.accent,
+          borderWidth: 1,
+          borderRadius: 10,
+          padding: layout.compact ? 10 : 12,
+          gap: 8,
+        },
+        overrideRow: {
+          flexDirection: layout.compact ? "column" : "row",
+          justifyContent: "space-between",
+          alignItems: layout.compact ? "flex-start" : "center",
+          gap: 6,
         },
       }),
     [theme, layout.compact],
@@ -745,6 +853,67 @@ function TeamPanelView({
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>{t("panel.rosterTitle")}</Text>
 
+        {sessionOverrideEntries.length > 0 ? (
+          <View style={styles.overrideBox}>
+            <View style={styles.itemHeader}>
+              <Text style={styles.itemTitle}>
+                {t("panel.sessionOverridesTitle", {
+                  count: sessionOverrideEntries.length,
+                })}
+              </Text>
+              {agentId ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busyAction}
+                  onPress={() => void handleClearAllSessionOverrides()}
+                  style={[styles.btn, busyAction ? styles.btnDisabled : null]}
+                >
+                  <Icon
+                    name="Trash2"
+                    size={13}
+                    color={theme.colors.foreground}
+                  />
+                  <Text style={styles.btnText}>
+                    {t("panel.clearAllOverridesAction")}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+
+            <View style={styles.listGap}>
+              {sessionOverrideEntries.map(([roleId, override]) => (
+                <View key={roleId} style={styles.overrideRow}>
+                  <View style={styles.itemTitleRow}>
+                    <View style={[styles.pillBadge, styles.pillAccent]}>
+                      <Text style={styles.pillTextAccent}>{roleId}</Text>
+                    </View>
+                    <Text style={styles.infoLine}>
+                      {formatSessionOverrideTarget(override, locale)}
+                    </Text>
+                  </View>
+                  {agentId ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      disabled={busyAction}
+                      onPress={() =>
+                        void handleResetSingleSessionOverride(roleId)
+                      }
+                      style={[
+                        styles.btn,
+                        busyAction ? styles.btnDisabled : null,
+                      ]}
+                    >
+                      <Text style={styles.btnText}>
+                        {t("panel.resetSingleOverrideAction")}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
         <Text style={styles.subSectionTitle}>
           {t("panel.activeMembersTitle", { count: activeMembers.length })}
         </Text>
@@ -770,6 +939,13 @@ function TeamPanelView({
                     <View style={[styles.pillBadge, styles.pillEnabled]}>
                       <Text style={styles.pillTextSuccess}>{member.roleId}</Text>
                     </View>
+                    {resolved?.overriddenInSession ? (
+                      <View style={[styles.pillBadge, styles.pillAccent]}>
+                        <Text style={styles.pillTextAccent}>
+                          {t("panel.sessionOverrideBadge")}
+                        </Text>
+                      </View>
+                    ) : null}
                     {resolved?.status === "auto-matched" ? (
                       <View style={[styles.pillBadge, styles.pillAccent]}>
                         <Text style={styles.pillTextAccent}>
@@ -832,6 +1008,13 @@ function TeamPanelView({
                       <View style={[styles.pillBadge, styles.pillDisabled]}>
                         <Text style={styles.pillTextMuted}>{member.roleId}</Text>
                       </View>
+                      {resolved?.overriddenInSession ? (
+                        <View style={[styles.pillBadge, styles.pillAccent]}>
+                          <Text style={styles.pillTextAccent}>
+                            {t("panel.sessionOverrideBadge")}
+                          </Text>
+                        </View>
+                      ) : null}
                       {resolved?.status === "auto-matched" ? (
                         <View style={[styles.pillBadge, styles.pillAccent]}>
                           <Text style={styles.pillTextAccent}>
@@ -881,6 +1064,12 @@ function TeamPanelView({
                 item.provider,
                 item.model ?? "",
               );
+              const showUpdateInPlace =
+                item.status !== "closed" &&
+                item.syncStatus === "update-in-place";
+              const showReplaceProvider =
+                item.status !== "closed" &&
+                item.syncStatus === "replace-provider";
               return (
                 <View key={item.agentId} style={styles.itemCard}>
                   <View style={styles.itemHeader}>
@@ -914,6 +1103,20 @@ function TeamPanelView({
                           </Text>
                         </View>
                       )}
+
+                      {showUpdateInPlace ? (
+                        <View style={[styles.pillBadge, styles.pillWarning]}>
+                          <Text style={styles.pillTextWarning}>
+                            {t("panel.syncUpdateInPlaceBadge")}
+                          </Text>
+                        </View>
+                      ) : showReplaceProvider ? (
+                        <View style={[styles.pillBadge, styles.pillWarning]}>
+                          <Text style={styles.pillTextWarning}>
+                            {t("panel.syncReplaceProviderBadge")}
+                          </Text>
+                        </View>
+                      ) : null}
 
                       {item.background ? (
                         <View style={[styles.pillBadge, styles.pillDisabled]}>
@@ -953,6 +1156,24 @@ function TeamPanelView({
                       ? ` · ${localizeModeLabel(item.modeId, item.modeId, locale)}`
                       : ""}
                   </Text>
+
+                  {showUpdateInPlace ? (
+                    <Text style={styles.warningText}>
+                      {item.targetProviderModel
+                        ? t("panel.syncUpdateInPlaceHint", {
+                            target: item.targetProviderModel,
+                          })
+                        : (item.syncReason ?? "")}
+                    </Text>
+                  ) : showReplaceProvider ? (
+                    <Text style={styles.warningText}>
+                      {item.targetProviderModel
+                        ? t("panel.syncReplaceProviderHint", {
+                            target: item.targetProviderModel,
+                          })
+                        : (item.syncReason ?? "")}
+                    </Text>
+                  ) : null}
                 </View>
               );
             })}

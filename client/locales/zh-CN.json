@@ -209,6 +209,12 @@
     "noMembers": "当前模板暂无已启用角色。",
     "autoBadge": "自动",
     "fallbackBadge": "回退",
+    "sessionOverrideBadge": "会话覆盖",
+    "sessionOverridesTitle": "当前会话模型覆盖（{{count}}）",
+    "clearAllOverridesAction": "清除全部会话覆盖",
+    "resetSingleOverrideAction": "恢复默认",
+    "sessionOverridesClearedToast": "已清除当前会话全部模型覆盖",
+    "sessionOverrideResetToast": "已恢复 {{roleId}} 的默认模型配置",
     "autoUnresolvedHint": "自动匹配（跟随调用方提供方）",
     "fallbackHint": "已触发回退（{{configured}} 在当前宿主机不可用）",
     "agentsTitle": "工作区会话与子智能体（{{count}}）",
@@ -216,6 +222,10 @@
     "commanderBadge": "指挥",
     "subagentBadge": "子智能体",
     "backgroundBadge": "后台",
+    "syncUpdateInPlaceBadge": "模型待更新",
+    "syncUpdateInPlaceHint": "目标：{{target}} · 可原地切换",
+    "syncReplaceProviderBadge": "提供方已变更",
+    "syncReplaceProviderHint": "目标：{{target}} · 需新建替代会话交接",
     "openAgentAction": "跳转",
     "agentStatuses": {
       "initializing": "启动中",
@@ -231,9 +241,9 @@
     "toggleSessionTitle": "团队管理：切换当前会话团队模式"
   },
   "slash": {
-    "description": "切换团队模式、选择模板或打开团队状态面板",
-    "argumentHint": "[status|on|off|auto|preset 模板ID|settings]",
-    "invalidArgs": "无效参数「{{arg}}」。支持 status、on、off、auto、preset 模板ID 或 settings。",
+    "description": "切换团队模式、选择模板、重置会话覆盖或打开团队状态面板",
+    "argumentHint": "[status|on|off|auto|preset 模板ID|reset-overrides|settings]",
+    "invalidArgs": "无效参数「{{arg}}」。支持 status、on、off、auto、preset 模板ID、reset-overrides 或 settings。",
     "presetNotFound": "未找到团队模板「{{presetId}}」。"
   }
 }

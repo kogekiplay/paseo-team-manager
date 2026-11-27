@@ -209,6 +209,12 @@
     "noMembers": "No active roles in this preset.",
     "autoBadge": "Auto",
     "fallbackBadge": "Fallback",
+    "sessionOverrideBadge": "Session override",
+    "sessionOverridesTitle": "Session Model Overrides ({{count}})",
+    "clearAllOverridesAction": "Clear session overrides",
+    "resetSingleOverrideAction": "Reset",
+    "sessionOverridesClearedToast": "Cleared session model overrides",
+    "sessionOverrideResetToast": "Reset model override for {{roleId}}",
     "autoUnresolvedHint": "Auto-match (follows caller provider)",
     "fallbackHint": "Fallback active ({{configured}} unavailable on this host)",
     "agentsTitle": "Workspace Sessions ({{count}})",
@@ -216,6 +222,10 @@
     "commanderBadge": "Commander",
     "subagentBadge": "Subagent",
     "backgroundBadge": "Background",
+    "syncUpdateInPlaceBadge": "Update available",
+    "syncUpdateInPlaceHint": "Target: {{target}} · Can update in place",
+    "syncReplaceProviderBadge": "Provider changed",
+    "syncReplaceProviderHint": "Target: {{target}} · Needs replacement handoff",
     "openAgentAction": "Open",
     "agentStatuses": {
       "initializing": "Starting",
@@ -231,9 +241,9 @@
     "toggleSessionTitle": "Team Manager: Toggle team mode for current session"
   },
   "slash": {
-    "description": "Manage team mode, presets, and status panel",
-    "argumentHint": "[status|on|off|auto|preset ID|settings]",
-    "invalidArgs": "Unknown option \"{{arg}}\". Use status, on, off, auto, preset ID, or settings.",
+    "description": "Manage team mode, presets, session overrides, and status panel",
+    "argumentHint": "[status|on|off|auto|preset ID|reset-overrides|settings]",
+    "invalidArgs": "Unknown option \"{{arg}}\". Use status, on, off, auto, preset ID, reset-overrides, or settings.",
     "presetNotFound": "Team preset \"{{presetId}}\" was not found."
   }
 }

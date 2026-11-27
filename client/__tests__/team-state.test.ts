@@ -23,6 +23,7 @@ import {
   duplicatePreset,
   encodeComposerTeamValue,
   formatMemberSummary,
+  formatSessionOverrideTarget,
   hasExcludedDirectory,
   isValidRoleId,
   localizeModeLabel,
@@ -32,6 +33,7 @@ import {
   normalizeExcludedDirectories,
   parseTeamSlashArgs,
   removeExcludedDirectory,
+  removeSessionMemberOverride,
   setAllPresetMembersAuto,
   toggleMemberEnabled,
   updatePreset,
@@ -116,6 +118,12 @@ describe("parseTeamSlashArgs", () => {
     assert.deepEqual(parseTeamSlashArgs("OFF"), { kind: "off" });
     assert.deepEqual(parseTeamSlashArgs("auto"), { kind: "auto" });
     assert.deepEqual(parseTeamSlashArgs("default"), { kind: "auto" });
+    assert.deepEqual(parseTeamSlashArgs("reset-overrides"), {
+      kind: "reset-overrides",
+    });
+    assert.deepEqual(parseTeamSlashArgs("RESET"), {
+      kind: "reset-overrides",
+    });
     assert.deepEqual(parseTeamSlashArgs("preset default-fullstack"), {
       kind: "preset",
       presetId: "default-fullstack",
@@ -459,5 +467,40 @@ describe("brand SVG icon and host auto-match helpers", () => {
       assert.equal(member.modeId, "");
       assert.deepEqual(member.features, {});
     }
+  });
+
+  it("formats and removes session-scoped member overrides cleanly", () => {
+    const overrides = {
+      backend: {
+        provider: "codex",
+        model: "auto/gpt-6.2-sol",
+        thinkingOptionId: "xhigh",
+        features: { service_tier: "default" },
+      },
+      frontend: {
+        provider: AUTO_PROVIDER,
+        model: "",
+      },
+    };
+
+    assert.equal(
+      formatSessionOverrideTarget(overrides.backend, "zh-CN"),
+      "codex/auto/gpt-6.2-sol · 极高 · 速度=普通",
+    );
+    assert.equal(
+      formatSessionOverrideTarget(overrides.frontend, "zh-CN"),
+      "自动匹配",
+    );
+    assert.equal(
+      formatSessionOverrideTarget(overrides.frontend, "en"),
+      AUTO_PROVIDER,
+    );
+
+    const afterOne = removeSessionMemberOverride(overrides, "BACKEND");
+    assert.ok(afterOne !== null);
+    assert.deepEqual(Object.keys(afterOne), ["frontend"]);
+
+    const afterAll = removeSessionMemberOverride(afterOne, "frontend");
+    assert.equal(afterAll, null);
   });
 });

@@ -168,6 +168,17 @@ export default function contribute(client: PluginClientContext) {
       const { values: settings } = getSettingsStoreSnapshot();
       const focusedComposer = composers({ focused: true })[0] ?? null;
 
+      if (parsed.kind === "reset-overrides") {
+        if (focusedComposer) {
+          await focusedComposer.setMetadata({
+            [METADATA_KEYS.memberOverrides]: null,
+          });
+        } else {
+          openPanel("team-workspace");
+        }
+        return;
+      }
+
       if (parsed.kind === "preset") {
         const matched = settings.presets.find(
           (item) => item.id.toLowerCase() === parsed.presetId.toLowerCase(),
