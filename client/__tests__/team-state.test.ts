@@ -476,10 +476,12 @@ describe("brand SVG icon and host auto-match helpers", () => {
         model: "auto/gpt-6.2-sol",
         thinkingOptionId: "xhigh",
         features: { service_tier: "default" },
+        baseFingerprint: "fp-backend-v1",
       },
       frontend: {
         provider: AUTO_PROVIDER,
         model: "",
+        baseFingerprint: "fp-frontend-v1",
       },
     };
 
@@ -499,6 +501,7 @@ describe("brand SVG icon and host auto-match helpers", () => {
     const afterOne = removeSessionMemberOverride(overrides, "BACKEND");
     assert.ok(afterOne !== null);
     assert.deepEqual(Object.keys(afterOne), ["frontend"]);
+    assert.equal(afterOne.frontend.baseFingerprint, "fp-frontend-v1");
 
     const afterAll = removeSessionMemberOverride(afterOne, "frontend");
     assert.equal(afterAll, null);

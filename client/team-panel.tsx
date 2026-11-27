@@ -77,6 +77,9 @@ function serializeOverridesForMetadata(
     if (item.updatedAt !== undefined) {
       clean.updatedAt = item.updatedAt;
     }
+    if (item.baseFingerprint !== undefined) {
+      clean.baseFingerprint = item.baseFingerprint;
+    }
     result[roleId] = clean;
   }
   return result;
