@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PluginHookRequests } from "@getpaseo/plugin/server";
 import type { ProviderCatalogEntry } from "../../shared/contracts.ts";
+import { resolvePresetMembers } from "../../shared/catalog-defaults.ts";
 import {
-  createDefaultPresets, DEFAULT_TEAM_SETTINGS, LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL, parseTeamSettings,
+  computeMemberConfigFingerprint, createDefaultPresets, DEFAULT_TEAM_SETTINGS, LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL, parseTeamSettings,
 } from "../../shared/settings.ts";
 import { applyAgentCreateBefore, applyAgentOpenBefore } from "../hooks.ts";
-import { createRosterTool, createUpdateMemberModelTool } from "../tools.ts";
+import { createRosterTool, createUpdateMemberModelTool, listCommanderDriftedSubagents } from "../tools.ts";
 import type { HostAgent, HostPaseoApi } from "../paseo-types.ts";
 
 type PaseoAgent = HostAgent;
@@ -241,6 +242,7 @@ type AgentMetadata = NonNullable<PaseoAgent["metadata"]>;
 type ToolResult = Awaited<ReturnType<ReturnType<typeof createUpdateMemberModelTool>["execute"]>>;
 
 function setupSyncTools(values = settings, initialMetadata: AgentMetadata = {}, providers = syncCatalog) {
+  let currentSettings = values;
   let metadata: AgentMetadata | undefined = { retained: true, ...initialMetadata };
   let listError = false;
   const patches: AgentMetadata[] = [];
@@ -285,11 +287,12 @@ function setupSyncTools(values = settings, initialMetadata: AgentMetadata = {}, 
     agent: { id: "commander", workspaceId, parentAgentId: null, provider: "codex", cwd, title: null, background: false, metadata: initialMetadata },
   };
   const cache = { ensureFresh: async () => providers };
-  const updateTool = createUpdateMemberModelTool(() => values, homeDir, cache);
-  const rosterTool = createRosterTool(() => values, homeDir, cache);
+  const updateTool = createUpdateMemberModelTool(() => currentSettings, homeDir, cache);
+  const rosterTool = createRosterTool(() => currentSettings, homeDir, cache);
   return {
     context, patches, updateTool, getMetadata: () => metadata, failListing: () => { listError = true; },
     omitMetadata: () => { metadata = undefined; },
+    saveSettings: (next: typeof currentSettings) => { currentSettings = next; },
     update: (input: unknown) => updateTool.execute(input, context),
     roster: () => rosterTool.execute({}, context),
   };
@@ -298,12 +301,58 @@ function setupSyncTools(values = settings, initialMetadata: AgentMetadata = {}, 
 function readSyncResult(result: ToolResult) {
   assert.equal(result.isError, undefined, result.text ?? "");
   return result.structuredContent as {
-    sessionMemberOverrides: Record<string, { provider: string; model: string; thinkingOptionId?: string; features?: Record<string, unknown> }>;
+    sessionMemberOverrides: Record<string, { provider: string; model: string; thinkingOptionId?: string; features?: Record<string, unknown>; baseFingerprint?: string }>;
     resolvedMembers: { roleId: string; overriddenInSession: boolean; modeId: string }[];
     affectedAgents: { agentId: string; syncStatus: string; targetProviderModel: string; updateAgentParams: unknown; createAgentParams: unknown }[];
     agentListError: string | null;
   };
 }
+
+test("saved session overrides use the base preset fingerprint and the live roster picks up settings edits", async () => {
+  const fixture = setupSyncTools();
+  const saved = readSyncResult(await fixture.update({ roleId: "backend", provider: "claude/claude-sonnet" }));
+  const baseFingerprint = computeMemberConfigFingerprint(settings.presets[0].members[0]);
+  assert.equal(saved.sessionMemberOverrides.backend.baseFingerprint, baseFingerprint);
+  const editedOverride = readSyncResult(await fixture.update({ roleId: "backend", provider: "codex/auto/gpt-6.2-sol" }));
+  assert.equal(editedOverride.sessionMemberOverrides.backend.baseFingerprint, baseFingerprint);
+
+  const [preset] = createDefaultPresets();
+  preset.members[0] = { ...preset.members[0], provider: "codex", model: "gpt-5.4" };
+  fixture.saveSettings(parseTeamSettings({ presets: [preset] }));
+  const live = await fixture.roster();
+  const data = readSyncResult(live);
+  assert.equal(data.sessionMemberOverrides.backend, undefined);
+  assert.equal(data.resolvedMembers[0].overriddenInSession, false);
+  assert.match(live.text ?? "", /目标 `codex\/gpt-5\.4`[\s\S]*下次向上述角色派发任务前/);
+  assert.equal(fixture.patches.length, 2);
+  const unrelated = readSyncResult(await fixture.update({ roleId: "frontend", provider: "auto" }));
+  assert.deepEqual(Object.keys(unrelated.sessionMemberOverrides), ["frontend"]);
+  assert.equal(fixture.patches.length, 3);
+});
+
+test("the opening drift lookup is read-only, commander-scoped and bounded even if the host stalls", async () => {
+  const [preset] = createDefaultPresets();
+  preset.members[0] = { ...preset.members[0], provider: "codex", model: "gpt-5.4" };
+  const fixture = setupSyncTools();
+  const commander = fixture.context.agent;
+  const { resolved } = resolvePresetMembers(preset, syncCatalog);
+  const drift = await listCommanderDriftedSubagents(fixture.context.paseo, commander, homeDir, resolved, preset.id);
+  assert.deepEqual(drift.map(({ agentId, syncStatus }) => [agentId, syncStatus]), [["child", "update-in-place"], ["front-child", "replace-provider"]]);
+  assert.equal(fixture.patches.length, 0);
+  let finish!: () => void;
+  let pages = 0;
+  const stalled = { agents: { list: async () => {
+    pages++;
+    await new Promise<void>((resolve) => { finish = resolve; });
+    return { entries: [], pageInfo: { nextCursor: "next" } };
+  } } } as unknown as PaseoApi;
+  assert.deepEqual(await listCommanderDriftedSubagents(stalled, commander, homeDir, resolved, preset.id, { timeoutMs: 1 }), []);
+  finish();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(pages, 1);
+  fixture.failListing();
+  assert.deepEqual(await listCommanderDriftedSubagents(fixture.context.paseo, commander, homeDir, resolved, preset.id), []);
+});
 
 test("updating the session model persists only override metadata and reports same-provider drift to the live roster", async () => {
   const fixture = setupSyncTools();

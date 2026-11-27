@@ -1,8 +1,10 @@
 import {
   LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL,
-  applySessionMemberOverridesToPreset, parseSessionMemberOverrides,
+  applySessionMemberOverridesToPreset, filterActiveSessionMemberOverrides, normalizeDirectoryPath, parseSessionMemberOverrides,
   type SessionMemberOverridesMap, type TeamMember, type TeamPreset, type TeamSettingsValues, type WorkspaceOverride,
 } from "./settings.ts";
+
+export { normalizeDirectoryPath } from "./settings.ts";
 
 export type EffectiveDecisionSource =
   | "agent-metadata"
@@ -14,6 +16,7 @@ export interface EffectiveTeamConfig {
   enabled: boolean;
   source: EffectiveDecisionSource;
   preset: TeamPreset;
+  basePreset: TeamPreset;
   presetId: string;
   excludedByDirectory: string | null;
   sessionMemberOverrides: SessionMemberOverridesMap;
@@ -28,15 +31,6 @@ interface WorkspaceContext {
 interface AgentContext {
   labels?: Readonly<Record<string, string>> | null;
   metadata?: Readonly<Record<string, unknown>> | null;
-}
-
-export function normalizeDirectoryPath(input: string, homeDir?: string): string {
-  let path = input.trim();
-  if (homeDir && (path === "~" || path.startsWith("~/"))) {
-    path = homeDir + path.slice(1);
-  }
-  const normalized = path.replace(/\/{2,}/g, "/");
-  return normalized === "/" ? normalized : normalized.replace(/\/+$/, "");
 }
 
 export function findMatchingExcludedDirectory(
@@ -90,9 +84,9 @@ export function resolveEffectiveTeamConfig({
   const basePreset = presetIds
     .map((id) => typeof id === "string" ? settings.presets.find((item) => item.id === id.trim()) : undefined)
     .find((item) => item !== undefined) ?? settings.presets[0];
-  const sessionMemberOverrides = parseSessionMemberOverrides(metadata);
+  const { active: sessionMemberOverrides } = filterActiveSessionMemberOverrides(basePreset, parseSessionMemberOverrides(metadata));
   const preset = applySessionMemberOverridesToPreset(basePreset, sessionMemberOverrides);
-  const selection = { preset, presetId: preset.id, excludedByDirectory, sessionMemberOverrides };
+  const selection = { preset, basePreset, presetId: preset.id, excludedByDirectory, sessionMemberOverrides };
 
   if (!settings.enabled) return { ...selection, enabled: false, source: "global-default" };
 

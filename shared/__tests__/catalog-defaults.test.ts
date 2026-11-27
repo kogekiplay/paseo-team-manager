@@ -87,7 +87,11 @@ test("a sync plan suggests a replacement for a different provider and handles un
   assert.equal(replacement.updateAgentParams, null);
   assert.deepEqual(replacement.createAgentParams?.settings, { thinkingOptionId: "high" });
   assert.equal(replacement.createAgentParams?.provider, "antigravity/gemini-4-neon");
-  for (const unresolved of [undefined, resolveTeamMember(preset.members[1], [])]) {
+  for (const unresolved of [
+    undefined,
+    resolveTeamMember(preset.members[1], []),
+    resolveTeamMember(preset.members[1], [], "codex"),
+  ]) {
     const plan = evaluateSubagentSync(agent, unresolved, preset.id);
     assert.equal(plan.syncStatus, "unresolved");
     assert.equal(plan.targetProviderModel, null);

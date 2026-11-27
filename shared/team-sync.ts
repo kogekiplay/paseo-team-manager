@@ -39,12 +39,15 @@ export function evaluateSubagentSync(
   const { member } = target;
   const targetProviderModel = formatProviderModel(member.provider, member.model);
   if (agent.provider.trim().toLowerCase() !== member.provider.trim().toLowerCase()) {
+    if (!member.model) {
+      return { ...emptyPlan, syncStatus: "unresolved", syncReason: "请先确认目标提供方的可用模型，再创建替代会话。", targetProviderModel: null };
+    }
     return {
       ...emptyPlan,
       syncStatus: "replace-provider",
       syncReason: "提供方已变更，Paseo 无法原地切换。若目标提供方没有可复用的同角色会话，请新建替代会话，交接上下文摘要，并保留旧会话。若 Paseo 要求显式权限模式，请由用户为目标提供方选择。",
       targetProviderModel,
-      createAgentParams: buildMemberCreateAgentParams(member, presetId),
+      createAgentParams: buildMemberCreateAgentParams({ ...member, modeId: "" }, presetId),
     };
   }
 

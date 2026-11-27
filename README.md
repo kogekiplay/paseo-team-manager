@@ -32,11 +32,13 @@ The global team switch is a hard gate. When it is disabled, session metadata and
 
 ## Changing models in an existing Commander session
 
-In v0.3.0, ask a Commander to change a member's model, for example “Switch backend to `codex/auto/gpt-6.2-sol`.” The Commander uses `team_update_member_model` to save the override in that session. Reopening the session keeps the override. The global preset and other sessions keep their own settings. Ask to reset one role or restore all member defaults to clear the corresponding overrides.
+Ask a Commander to change a member's model, for example “Switch backend to `codex/auto/gpt-6.2-sol`.” The Commander uses `team_update_member_model` to save an override for that session. Ask to reset one role or restore all member defaults to clear the corresponding overrides.
+
+Starting in v0.3.1, editing a role's model configuration or restoring its defaults in Settings supersedes a session override saved against a different configuration. Overrides from v0.3.0 stay active until reset or rewritten. On the next task, an existing Commander reads the latest roster before dispatching. When a Commander opens or resumes, its instructions also include any detected sync plans for its existing subagents. Paseo 0.17.1's reload API can interrupt a turn, so active sessions get freshness through the live roster.
 
 The Commander checks the live roster before assigning work. For the same provider, it uses native `update_agent` to apply changes to the model, thinking level, or supported options while preserving the subagent's context. If the provider changes and the Commander has no reusable session on the target provider, it creates a replacement, hands off a context summary, and keeps the original session available. Archiving requires an explicit user request.
 
-Model updates preserve existing session permission modes. A new agent can inherit an explicitly configured preset mode only when the override keeps that preset's provider. Auto and cross-provider overrides leave the new session's mode to Paseo. If Paseo requires an explicit mode to create the replacement, the user chooses it for the target provider.
+Model updates preserve existing session permission modes. A new agent can inherit an explicitly configured preset mode when the override keeps that preset's provider. Auto and cross-provider overrides and replacement plans leave the new session's mode to Paseo. If Paseo requires an explicit mode to create the replacement, the user chooses it for the target provider.
 
 ## Installation
 

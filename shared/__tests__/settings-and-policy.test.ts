@@ -5,11 +5,76 @@ import {
   normalizeDirectoryPath, resolveEffectiveTeamConfig, resolveSubagentRoleId, resolveWorkspaceOverride,
 } from "../policy.ts";
 import {
-  applySessionMemberOverridesToPreset, createDefaultPresets, DEFAULT_TEAM_SETTINGS, formatProviderModel, LABEL_KEYS, METADATA_KEYS,
+  applySessionMemberOverridesToPreset, computeMemberConfigFingerprint, computeTeamSyncFingerprint, createDefaultPresets,
+  DEFAULT_TEAM_SETTINGS, filterActiveSessionMemberOverrides, formatProviderModel, LABEL_KEYS, METADATA_KEYS,
   PARENT_AGENT_ID_LABEL, parseSessionMemberOverrides, parseTeamSettings, teamSettings, TeamMemberSchema, TeamPresetSchema,
 } from "../settings.ts";
 
 const homeDir = "/Users/tester";
+
+test("member fingerprints normalize Auto and key order and fit the metadata field", () => {
+  const base = { ...createDefaultPresets()[0].members[0], features: { trace: false, detail: "normal" } };
+  const fingerprint = computeMemberConfigFingerprint(base);
+  assert.deepEqual(JSON.parse(fingerprint), {
+    provider: "auto", model: "", thinkingOptionId: "", modeId: "", features: { detail: "normal", trace: false },
+  });
+  assert.equal(fingerprint, computeMemberConfigFingerprint({
+    ...base, provider: " AUTO ", model: "ignored", features: { detail: "normal", trace: false },
+  }));
+  const explicit = { ...base, provider: "codex", model: "one" };
+  assert.notEqual(computeMemberConfigFingerprint(explicit), computeMemberConfigFingerprint({ ...explicit, model: "two" }));
+  assert.notEqual(computeMemberConfigFingerprint(explicit), computeMemberConfigFingerprint({ ...explicit, modeId: "plan" }));
+  const long = { ...explicit, features: { a: "x".repeat(600) } };
+  const bounded = computeMemberConfigFingerprint(long);
+  assert.ok(bounded.length <= 512);
+  assert.notEqual(bounded, computeMemberConfigFingerprint({ ...long, features: { a: `${long.features.a}y` } }));
+});
+
+test("team sync fingerprints ignore copy edits and normalize directory and override order", () => {
+  const original = parseTeamSettings({
+    excludedDirectories: ["~/tmp/", "/test//files"],
+    workspaceOverrides: { two: { enabled: false }, one: { enabled: true } },
+  });
+  const changed = parseTeamSettings({
+    ...original, excludedDirectories: ["/test/files/", "~/tmp"],
+    workspaceOverrides: { one: { enabled: true }, two: { enabled: false } },
+  });
+  changed.showComposerControl = false;
+  changed.enforceMemberDefaultsOnCreate = false;
+  Object.assign(changed.presets[0], { name: "Team", description: "New", commanderExtraInstructions: "Extra" });
+  Object.assign(changed.presets[0].members[0], { name: "New name", responsibilities: "New duty", rolePrompt: "Extra" });
+  assert.equal(computeTeamSyncFingerprint(original), computeTeamSyncFingerprint(changed));
+  Object.assign(changed.presets[0].members[0], { provider: "codex", model: "other" });
+  assert.notEqual(computeTeamSyncFingerprint(original), computeTeamSyncFingerprint(changed));
+  assert.notEqual(computeTeamSyncFingerprint(original), computeTeamSyncFingerprint({ ...original, enabled: false }));
+});
+
+test("settings take precedence over a superseded override while legacy overrides remain active", () => {
+  const [preset] = createDefaultPresets();
+  const overrides = {
+    BACKEND: { provider: "codex", model: "session-model", baseFingerprint: computeMemberConfigFingerprint(preset.members[0]) },
+    frontend: { provider: "codex", model: "legacy-model" },
+    removed: { provider: "auto", model: "" },
+  };
+  assert.deepEqual(filterActiveSessionMemberOverrides(preset, overrides), {
+    active: { backend: overrides.BACKEND, frontend: overrides.frontend },
+    supersededRoleIds: ["removed"],
+  });
+  const changed = {
+    ...preset,
+    members: preset.members.map((member) => ({ ...member, provider: "codex", model: "settings-model" })),
+  };
+  assert.deepEqual(filterActiveSessionMemberOverrides(changed, overrides), {
+    active: { frontend: overrides.frontend },
+    supersededRoleIds: ["backend", "removed"],
+  });
+  const effective = resolveEffectiveTeamConfig({
+    settings: parseTeamSettings({ presets: [changed] }),
+    metadata: { [METADATA_KEYS.memberOverrides]: overrides },
+  });
+  assert.deepEqual(effective.sessionMemberOverrides, { frontend: overrides.frontend });
+  assert.deepEqual(effective.preset.members.slice(0, 2).map(({ model }) => model), ["settings-model", "legacy-model"]);
+});
 
 test("session override parsing normalizes roles and discards malformed entries and permission fields", () => {
   const metadata = {

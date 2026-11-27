@@ -3,9 +3,9 @@ import { z } from "zod";
 import type { ProviderCatalogEntry, WorkspaceTeamAgent } from "../shared/contracts.ts";
 import { evaluateSubagentSync, resolvePresetMembers, resolveTeamMember, summarizeResolvedMember, type ResolvedTeamMember } from "../shared/catalog-defaults.ts";
 import { isSubagentLabels, normalizeDirectoryPath, resolveEffectiveTeamConfig, resolveSubagentRoleId } from "../shared/policy.ts";
-import { buildMemberCreateAgentParams } from "../shared/prompt-builder.ts";
+import { buildMemberCreateAgentParams, type DriftedSubagentPromptItem } from "../shared/prompt-builder.ts";
 import {
-  AUTO_PROVIDER, FeatureValueSchema, formatProviderModel, LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL,
+  AUTO_PROVIDER, computeMemberConfigFingerprint, FeatureValueSchema, formatProviderModel, LABEL_KEYS, METADATA_KEYS, PARENT_AGENT_ID_LABEL,
   SessionMemberOverrideSchema, type SessionMemberOverridesMap, type TeamMember, type TeamSettingsValues,
 } from "../shared/settings.ts";
 import type { HostAgent, HostPaseoApi } from "./paseo-types.ts";
@@ -13,14 +13,16 @@ import type { HostAgent, HostPaseoApi } from "./paseo-types.ts";
 type PaseoAgent = HostAgent;
 type PaseoApi = HostPaseoApi;
 type CatalogCache = Pick<import("./provider-catalog-cache.ts").ProviderCatalogCache, "ensureFresh">;
+type CommanderLocation = { id: string; workspaceId: string | null; cwd: string };
 
 export async function listWorkspaceAgents(
   paseo: PaseoApi,
-  { workspaceId, cwd, homeDir, includeBackground = false }: {
+  { workspaceId, cwd, homeDir, includeBackground = false, signal }: {
     workspaceId: string | null;
     cwd?: string;
     homeDir: string;
     includeBackground?: boolean;
+    signal?: AbortSignal;
   },
 ): Promise<PaseoAgent[]> {
   const directory = cwd && normalizeDirectoryPath(cwd, homeDir);
@@ -28,6 +30,7 @@ export async function listWorkspaceAgents(
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
   do {
+    if (signal?.aborted) return [];
     const { entries, pageInfo } = await paseo.agents.list({ includeBackground, page: { limit: 200, cursor } });
     for (const { agent } of entries) {
       const inWorkspace = workspaceId
@@ -81,14 +84,14 @@ export function planWorkspaceAgentSync(
 
 async function listTeamAgents(
   paseo: PaseoApi,
-  commander: { id: string; workspaceId: string | null; cwd: string },
+  commander: CommanderLocation,
   homeDir: string,
   resolved: readonly ResolvedTeamMember[],
   presetId: string,
-  { enabled, affectedRoles }: { enabled: boolean; affectedRoles?: ReadonlySet<string> },
+  { enabled, affectedRoles, signal }: { enabled: boolean; affectedRoles?: ReadonlySet<string>; signal?: AbortSignal },
 ) {
   try {
-    const agents = await listWorkspaceAgents(paseo, { ...commander, homeDir });
+    const agents = await listWorkspaceAgents(paseo, { ...commander, homeDir, signal });
     return {
       agents: agents.flatMap((agent) => {
         const view = toWorkspaceTeamAgent(agent);
@@ -101,6 +104,38 @@ async function listTeamAgents(
     };
   } catch (error) {
     return { agents: [], agentListError: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function listCommanderDriftedSubagents(
+  paseo: PaseoApi,
+  commander: CommanderLocation,
+  homeDir: string,
+  resolved: readonly ResolvedTeamMember[],
+  presetId: string,
+  { timeoutMs = 1000 }: { timeoutMs?: number } = {},
+): Promise<DriftedSubagentPromptItem[]> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const listing = listTeamAgents(paseo, commander, homeDir, resolved, presetId, { enabled: true, signal: controller.signal });
+    const deadline = new Promise<DriftedSubagentPromptItem[]>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve([]);
+      }, timeoutMs);
+    });
+    const drifted = listing.then(({ agents }) => agents.flatMap((agent): DriftedSubagentPromptItem[] => {
+      if (agent.syncStatus !== "update-in-place" && agent.syncStatus !== "replace-provider") return [];
+      const { agentId, roleId, title, provider, model, syncStatus, syncReason, targetProviderModel, updateAgentParams, createAgentParams } = agent;
+      return [{
+        agentId, roleId, title, provider, model, syncStatus, syncReason: syncReason ?? null, targetProviderModel: targetProviderModel ?? null,
+        updateAgentParams: updateAgentParams ?? null, createAgentParams: createAgentParams ?? null,
+      }];
+    }));
+    return await Promise.race([drifted, deadline]).catch(() => []);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -131,12 +166,11 @@ export function createRosterTool(
     description: "只读查询当前团队预设、成员的 create_agent 参数及工作区已有的团队子智能体。新建前可据此复用同角色会话。",
     input: z.object({}),
     async execute(_input, { agent, paseo }) {
-      const settings = getSettings();
       const { workspaceId, cwd } = agent;
       const catalogProviders = catalogCache ? await catalogCache.ensureFresh(paseo, { cwd }) : [];
       const current = await Promise.resolve().then(() => paseo.agents.ref(agent.id).refresh()).then((result) => result?.agent).catch(() => undefined);
       const { preset, presetId, enabled, source, excludedByDirectory, sessionMemberOverrides } = resolveEffectiveTeamConfig({
-        settings, workspaceId, cwd, metadata: current ? current.metadata : agent.metadata, labels: current?.labels, homeDir,
+        settings: getSettings(), workspaceId, cwd, metadata: current ? current.metadata : agent.metadata, labels: current?.labels, homeDir,
       });
       const { resolved } = resolvePresetMembers(preset, catalogProviders, agent.provider);
       const members = resolved.map((item) => ({
@@ -159,6 +193,9 @@ export function createRosterTool(
         "",
         "### 工作区团队子智能体",
         ...formatTeamAgents(listing),
+        ...(listing.agents.some(({ syncStatus }) => syncStatus === "update-in-place" || syncStatus === "replace-provider")
+          ? ["", "下次向上述角色派发任务前，请按当前同步计划更新或复用匹配会话，无需等待用户额外要求换模型。"]
+          : []),
       ].join("\n");
       return {
         text,
@@ -278,8 +315,8 @@ export function createUpdateMemberModelTool(
           affectedRoles = new Set(Object.keys(nextOverrides));
           for (const role of affectedRoles) delete nextOverrides[role];
         } else {
-          const member = effective.preset.members.find((item) => item.roleId.toLowerCase() === roleId);
-          if (!member) {
+          const index = effective.basePreset.members.findIndex((item) => item.roleId.toLowerCase() === roleId);
+          if (index < 0) {
             return fail(`当前预设中的可用角色：${effective.preset.members.map((item) => item.roleId).join("、") || "无"}。请指定有效的 \`roleId\`。`);
           }
           affectedRoles = new Set([roleId]);
@@ -287,11 +324,11 @@ export function createUpdateMemberModelTool(
             delete nextOverrides[roleId];
           } else {
             // An offline caller fallback is useful only when there is no catalog to validate against.
-            const resolved = resolveTeamMember(member, providers, providers.length === 0 ? current.provider : undefined);
+            const resolved = resolveTeamMember(effective.preset.members[index], providers, providers.length === 0 ? current.provider : undefined);
             const previous = Object.hasOwn(nextOverrides, roleId) ? nextOverrides[roleId] : undefined;
             const choice = resolveModelOverride(request.data, resolved.member, previous, providers);
             if (!choice.override) return fail(choice.error);
-            nextOverrides[roleId] = choice.override;
+            nextOverrides[roleId] = { ...choice.override, baseFingerprint: computeMemberConfigFingerprint(effective.basePreset.members[index]) };
           }
         }
 

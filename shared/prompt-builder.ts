@@ -1,4 +1,5 @@
 import type { ResolvedTeamMember } from "./catalog-defaults.ts";
+import type { SubagentSyncPlan } from "./team-sync.ts";
 import { AUTO_PROVIDER, LABEL_KEYS, formatProviderModel, type SessionMemberOverridesMap, type TeamMember, type TeamPreset } from "./settings.ts";
 
 export function buildMemberCreateAgentParams(member: TeamMember, presetId: string) {
@@ -17,12 +18,22 @@ export function buildMemberCreateAgentParams(member: TeamMember, presetId: strin
   };
 }
 
-export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers, sessionMemberOverrides = {} }: {
+export interface DriftedSubagentPromptItem extends SubagentSyncPlan {
+  agentId: string;
+  roleId: string | null;
+  title: string | null;
+  provider: string;
+  model: string | null;
+  syncStatus: "update-in-place" | "replace-provider";
+}
+
+export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers, sessionMemberOverrides = {}, driftedSubagents = [] }: {
   preset: TeamPreset;
   cwd?: string | null;
   workspaceId?: string | null;
   resolvedMembers?: readonly ResolvedTeamMember[];
   sessionMemberOverrides?: SessionMemberOverridesMap;
+  driftedSubagents?: readonly DriftedSubagentPromptItem[];
 }): string {
   const lines = [
     "## 当前工作区项目指挥（Commander）",
@@ -63,6 +74,22 @@ export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers
     lines.push("", "```json", JSON.stringify(params, null, 2), "```");
   }
 
+  if (driftedSubagents.length > 0) {
+    lines.push(
+      "", "### 待自动同步的已有子智能体", "",
+      "无需等待用户再交代换模型。下次给这些角色派发任务前，用 `team_get_roster` 确认以下计划仍有效，再按最新参数同步并继续任务。原地更新使用 `update_agent`。跨提供方时优先复用匹配会话，必要时使用 `create_agent` 新建替代会话、交接摘要并保留旧会话。若 Paseo 要求显式权限模式，由用户为目标提供方选择。",
+    );
+    for (const item of driftedSubagents) {
+      const current = formatProviderModel(item.provider, item.model ?? "");
+      const updating = item.syncStatus === "update-in-place";
+      const params = updating ? item.updateAgentParams : item.createAgentParams;
+      lines.push(
+        "", `- \`${item.agentId}\` · \`${item.roleId}\` · ${item.title ?? item.agentId} · 当前 \`${current}\` · 目标 \`${item.targetProviderModel}\` · \`${item.syncStatus}\``,
+      );
+      if (params) lines.push(`  \`${updating ? "update_agent" : "create_agent"}\` 参数 \`${JSON.stringify(params)}\``);
+    }
+  }
+
   const optional = preset.members.filter((member) => !member.enabled);
   if (optional.length > 0) {
     lines.push("", "### 可选扩展角色", "", "以下角色默认未启用，可按需或经用户要求调用。");
@@ -77,7 +104,7 @@ export function buildCommanderPrompt({ preset, cwd, workspaceId, resolvedMembers
     "", "### 调度与协作", "",
     "1. 通过 Paseo 原生 MCP 工具 `create_agent` / `send_agent_prompt` 调度子智能体，保留 Subagents 轨道和完成唤醒机制。创建时将示例 `title` 和 `initialPrompt` 替换为实际任务标题与指令。",
     `2. 调用 \`create_agent\` 时务必传入 \`labels: { "${LABEL_KEYS.role}": "<roleId>", "${LABEL_KEYS.preset}": "${preset.id}" }\`，建议用 \`[<roleId>] \` 开头的标题，例如 \`[backend] 实现接口\`。`,
-    "3. 每次派发或复用前调用只读工具 `team_get_roster`，以实时名册为准，本段示例是会话打开时的快照。优先复用本指挥已有的同角色健康子智能体，有多个时优先选 `in-sync` 的会话。若 `syncStatus` 为 `update-in-place`，先使用返回的参数调用原生 `update_agent`，再用 `send_agent_prompt` 派发。仅当没有可复用的目标提供方会话且状态为 `replace-provider` 时，按返回配置新建替代子智能体，交接上下文摘要并保留旧会话，除非用户明确要求归档。若 Paseo 要求为目标提供方显式设置权限模式，请先让用户选择。",
+    "3. 每次派发或复用前调用只读工具 `team_get_roster`，以实时名册为准，本段示例是会话打开时的快照。若上方列出待同步子智能体，或实时名册发现配置偏移，无需等用户额外交代换模型，派发前直接按最新同步计划处理后继续任务。优先复用本指挥已有的同角色健康子智能体，有多个时优先选 `in-sync` 的会话。若 `syncStatus` 为 `update-in-place`，先使用返回的参数调用原生 `update_agent`，再用 `send_agent_prompt` 派发。仅当没有可复用的目标提供方会话且状态为 `replace-provider` 时，按返回配置新建替代子智能体，交接上下文摘要并保留旧会话，除非用户明确要求归档。若 Paseo 要求为目标提供方显式设置权限模式，请先让用户选择。",
     "4. 多成员并行修改代码时，先划清各自可写文件边界，必要时使用独立 worktree。",
     "5. 派发时设置 `notifyOnFinish: true`，等待完成回调唤醒，避免循环轮询。",
     "6. 严格按照名册中的 `provider/model` 派发，禁止擅自升级或切换为 `astra`、`fable` 等高成本模型，除非用户明确要求。",

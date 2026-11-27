@@ -1,13 +1,33 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolvePresetMembers } from "../catalog-defaults.ts";
-import { buildCommanderPrompt, buildMemberCreateAgentParams, buildSubagentRolePrompt } from "../prompt-builder.ts";
+import { evaluateSubagentSync, resolvePresetMembers, resolveTeamMember } from "../catalog-defaults.ts";
+import { buildCommanderPrompt, buildMemberCreateAgentParams, buildSubagentRolePrompt, type DriftedSubagentPromptItem } from "../prompt-builder.ts";
 import { applySessionMemberOverridesToPreset, createDefaultPresets } from "../settings.ts";
 
 const catalog = [
   { provider: "codex", label: "Codex", enabled: true, status: "ready" as const, defaultModeId: "full-access", modes: [{ id: "full-access", label: "Full Access" }], models: [{ id: "auto/gpt-6.2-sol", label: "Sol", isDefault: true, thinkingOptions: [{ id: "xhigh", label: "XHigh", isDefault: true }] }], controls: [{ type: "select" as const, key: "service_tier", label: "Speed", choices: [{ value: "default", label: "Default" }] }] },
   { provider: "antigravity", label: "Antigravity", enabled: true, status: "ready" as const, defaultModeId: "full-access", modes: [{ id: "full-access", label: "Full Access" }], models: [{ id: "gemini-4-neon", label: "Neon", isDefault: true, thinkingOptions: [{ id: "high", label: "High", isDefault: true }] }, { id: "gemini-4-hydrogen", label: "Hydrogen", thinkingOptions: [{ id: "medium", label: "Medium", isDefault: true }] }], controls: [] },
 ];
+
+test("the commander receives both kinds of ready sync plans without permission changes", () => {
+  const [preset] = createDefaultPresets();
+  const target = resolveTeamMember({ ...preset.members[0], provider: "codex", model: "auto/gpt-6.2-sol", modeId: "full-access" }, catalog);
+  const driftedSubagents: DriftedSubagentPromptItem[] = ["codex", "antigravity"].map((provider) => {
+    const agent = { agentId: `child-${provider}`, provider, roleId: "backend", title: "Existing backend", model: "old-model", thinkingOptionId: null };
+    const plan = evaluateSubagentSync(agent, target, preset.id);
+    if (plan.syncStatus !== "update-in-place" && plan.syncStatus !== "replace-provider") assert.fail("Expected drift");
+    return { ...agent, ...plan, syncStatus: plan.syncStatus };
+  });
+  const prompt = buildCommanderPrompt({ preset, driftedSubagents });
+  const drift = prompt.split("### 待自动同步的已有子智能体")[1].split("### 可选扩展角色")[0];
+  assert.match(drift, /无需等待用户再交代换模型/);
+  assert.match(drift, /当前 `codex\/old-model` · 目标 `codex\/auto\/gpt-6\.2-sol` · `update-in-place`/);
+  assert.match(drift, /`update_agent` 参数 `{"agentId":"child-codex","settings":{"model":"auto\/gpt-6\.2-sol"}}`/);
+  assert.match(drift, /当前 `antigravity\/old-model` · 目标 `codex\/auto\/gpt-6\.2-sol` · `replace-provider`/);
+  assert.match(drift, /`create_agent` 参数 `{"provider":"codex\/auto\/gpt-6\.2-sol","settings":{}/);
+  assert.doesNotMatch(drift, /"modeId"/);
+  assert.doesNotMatch(buildCommanderPrompt({ preset }), /### 待自动同步的已有子智能体/);
+});
 
 test("the commander sees the session override and uses live model sync instructions", () => {
   const [base] = createDefaultPresets();

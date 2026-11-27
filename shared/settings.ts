@@ -23,6 +23,7 @@ export const SessionMemberOverrideSchema = z.object({
   thinkingOptionId: z.string().trim().max(64).optional(),
   features: z.record(z.string(), FeatureValueSchema).optional(),
   updatedAt: z.string().trim().max(64).optional(),
+  baseFingerprint: z.string().trim().max(512).optional(),
 }).refine((override) => override.provider === AUTO_PROVIDER || override.model.length > 0, {
   message: "Model is required when provider is not auto",
   path: ["model"],
@@ -77,6 +78,58 @@ export type TeamPreset = z.infer<typeof TeamPresetSchema>;
 export type WorkspaceOverride = z.infer<typeof WorkspaceOverrideSchema>;
 export type TeamSettingsValues = z.infer<typeof teamSettingsSchema>;
 
+export function normalizeDirectoryPath(input: string, homeDir?: string): string {
+  let path = input.trim();
+  if (homeDir && (path === "~" || path.startsWith("~/"))) {
+    path = homeDir + path.slice(1);
+  }
+  const normalized = path.replace(/\/{2,}/g, "/");
+  return normalized === "/" ? normalized : normalized.replace(/\/+$/, "");
+}
+
+export function computeMemberConfigFingerprint(
+  member: Pick<TeamMember, "provider" | "model" | "thinkingOptionId" | "modeId" | "features">,
+): string {
+  const provider = member.provider.trim().toLowerCase();
+  const canonical = JSON.stringify({
+    provider,
+    model: provider === AUTO_PROVIDER ? "" : member.model.trim(),
+    thinkingOptionId: member.thinkingOptionId.trim(),
+    modeId: member.modeId.trim(),
+    features: Object.fromEntries(Object.keys(member.features).sort().map((key) => [key, member.features[key]])),
+  });
+  if (canonical.length <= 512) return canonical;
+
+  // Long feature values must fit the metadata schema. Hash in both directions with portable 32-bit arithmetic.
+  let forward = 0x811c9dc5;
+  let reverse = 0x811c9dc5;
+  for (let index = 0; index < canonical.length; index++) {
+    forward = Math.imul(forward ^ canonical.charCodeAt(index), 0x01000193);
+    reverse = Math.imul(reverse ^ canonical.charCodeAt(canonical.length - index - 1), 0x01000193);
+  }
+  return JSON.stringify([canonical.length, forward >>> 0, reverse >>> 0]);
+}
+
+export function computeTeamSyncFingerprint(settings: TeamSettingsValues): string {
+  return JSON.stringify({
+    enabled: settings.enabled,
+    autoApplyToNewTopLevelAgents: settings.autoApplyToNewTopLevelAgents,
+    defaultPresetId: settings.defaultPresetId,
+    excludedDirectories: [...new Set(settings.excludedDirectories.map((path) => normalizeDirectoryPath(path)))].sort(),
+    workspaceOverrides: Object.keys(settings.workspaceOverrides).sort().map((key) => {
+      const override = settings.workspaceOverrides[key];
+      return [key, { enabled: override.enabled, presetId: override.presetId }];
+    }),
+    presets: settings.presets.map(({ id, commanderNoDirectEdit, members }) => ({
+      id,
+      commanderNoDirectEdit,
+      members: members.map((member) => ({
+        id: member.id, roleId: member.roleId, enabled: member.enabled, config: computeMemberConfigFingerprint(member),
+      })),
+    })),
+  });
+}
+
 export function parseSessionMemberOverrides(
   metadata?: Readonly<Record<string, unknown>> | null,
 ): SessionMemberOverridesMap {
@@ -87,6 +140,24 @@ export function parseSessionMemberOverrides(
     const override = SessionMemberOverrideSchema.safeParse(value);
     return roleId.success && override.success ? [[roleId.data.toLowerCase(), override.data]] : [];
   }));
+}
+
+export function filterActiveSessionMemberOverrides(
+  basePreset: TeamPreset,
+  overrides: SessionMemberOverridesMap,
+): { active: SessionMemberOverridesMap; supersededRoleIds: string[] } {
+  const activeOverrides: [string, SessionMemberOverride][] = [];
+  const supersededRoleIds: string[] = [];
+  for (const [key, override] of Object.entries(overrides)) {
+    const roleId = key.toLowerCase();
+    const baseMember = basePreset.members.find((member) => member.roleId.toLowerCase() === roleId);
+    if (!baseMember || (override.baseFingerprint !== undefined && override.baseFingerprint !== computeMemberConfigFingerprint(baseMember))) {
+      supersededRoleIds.push(roleId);
+    } else {
+      activeOverrides.push([roleId, override]);
+    }
+  }
+  return { active: Object.fromEntries(activeOverrides), supersededRoleIds };
 }
 
 export function applySessionMemberOverridesToPreset(

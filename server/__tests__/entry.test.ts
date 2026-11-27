@@ -89,6 +89,7 @@ test("entry registers both hooks and all RPCs, uses a racing settings update and
   resolveInitial({ status: "ready", revision: "1", values: defaults });
 
   const providerCalls: unknown[] = [];
+  const listingCalls: boolean[] = [];
   const childLabels = { [PARENT_AGENT_ID_LABEL]: "root", [LABEL_KEYS.role]: "FRONTEND", [LABEL_KEYS.preset]: "latest" };
   const agent = (id: string, fields: Partial<PaseoAgent> = {}) => ({
     id, provider: "codex", cwd, workspaceId: "workspace", title: id, status: "idle", labels: {},
@@ -117,7 +118,7 @@ test("entry registers both hooks and all RPCs, uses a racing settings update and
     } }) },
     agents: {
       list: async (options: { includeBackground: boolean }) => {
-        assert.equal(options.includeBackground, true);
+        listingCalls.push(options.includeBackground);
         return { entries: entries.map((item) => ({ agent: item })), pageInfo: { nextCursor: null } };
       },
       ref: (id: string) => ({ refresh: async () => ({ agent: entries.find((item) => item.id === id) }) }),
@@ -131,10 +132,14 @@ test("entry registers both hooks and all RPCs, uses a racing settings update and
   const openHook = fixture.hooks.get("agent.open.before")!;
   const openResult = await openHook({ request: open }, { paseo }) as { appendSystemPrompt: string[]; tools: AgentToolDefinition[] };
   assert.match(openResult.appendSystemPrompt[0], /验证最新配置/);
+  assert.match(openResult.appendSystemPrompt[0], /待自动同步的已有子智能体[\s\S]*`child`.*目标 `codex\/auto\/gpt-6\.2-sol`/);
+  assert.match(openResult.appendSystemPrompt[0], /`update_agent` 参数 `{"agentId":"child"/);
+  assert.doesNotMatch(openResult.appendSystemPrompt[0], /"modeId"/);
   assert.deepEqual(openResult.tools.map(({ name }) => name), ["team_get_roster", "team_update_member_model"]);
   const childOpen = await openHook({ request: { ...open, agentId: "child", labels: childLabels } }, { paseo }) as typeof openResult;
   assert.deepEqual(childOpen.tools, []);
   assert.doesNotMatch(childOpen.appendSystemPrompt[0], /team_get_roster|team_update_member_model/);
+  assert.deepEqual(listingCalls, [false]);
   const createResult = await fixture.hooks.get("agent.create.before")!({ request: {
     config: { provider: "codex", cwd, title: "[backend] task" },
     metadata: { [METADATA_KEYS.roleId]: "backend" },
@@ -226,6 +231,68 @@ test("cache keeps the last valid values across read failures, invalid updates an
   fixture.updateSettings({ status: "ready", revision: "3", values: parseTeamSettings({}) });
   assert.equal(cache.getSettings().enabled, false);
   assert.deepEqual(fixture.cleanupEvents, ["settings"]);
+});
+
+test("cache subscriptions start after the first read and only report changed ready values", async () => {
+  const initial = parseTeamSettings({});
+  const fixture = createServerFixture(async () => ({ status: "ready", revision: "1", values: initial }));
+  const cache = createSettingsCache(fixture.context);
+  const changes: unknown[] = [];
+  const listener = (next: typeof initial, prev: typeof initial) => changes.push([next, prev]);
+  const unsubscribe = cache.subscribe(listener);
+  await cache.waitReady();
+  const changed = parseTeamSettings({ enabled: false });
+  fixture.updateSettings({ status: "ready", revision: "2", values: parseTeamSettings({}) });
+  fixture.updateSettings({ status: "invalid", revision: "3", error: "invalid settings" });
+  fixture.updateSettings({ status: "ready", revision: "4", values: changed });
+  assert.deepEqual(changes, [[changed, initial]]);
+  unsubscribe();
+  fixture.updateSettings({ status: "ready", revision: "5", values: initial });
+  assert.equal(changes.length, 1);
+  cache.subscribe(listener);
+  await cache.dispose();
+  fixture.updateSettings({ status: "ready", revision: "6", values: changed });
+  assert.equal(changes.length, 1);
+});
+
+test("opening commanders discard a drift snapshot if scheduling settings change during the read", async (t) => {
+  const initial = parseTeamSettings({});
+  const fixture = createServerFixture(async () => ({ status: "ready", revision: "1", values: initial }));
+  t.after(contribute(fixture.context));
+  const changed = parseTeamSettings(initial);
+  changed.presets[0].members[0] = { ...changed.presets[0].members[0], provider: "codex", model: "other" };
+  const request = {
+    agentId: "root", workspaceId: "workspace", provider: "codex", cwd, reason: "resume", purpose: "interactive",
+    title: null, background: false, labels: {}, metadata: {}, tools: [], env: {}, mcpServers: {},
+  };
+  const child = {
+    id: "child", workspaceId: "workspace", provider: "codex", cwd, model: "old",
+    status: "idle", labels: { [PARENT_AGENT_ID_LABEL]: "root", [LABEL_KEYS.role]: "backend" },
+  };
+  let listStarted!: () => void;
+  let releaseList!: () => void;
+  const started = new Promise<void>((resolve) => { listStarted = resolve; });
+  const release = new Promise<void>((resolve) => { releaseList = resolve; });
+  const paseo = {
+    providers: { snapshot: async () => snapshot, listControls: async () => ({ controls }) },
+    agents: {
+      list: async () => {
+        listStarted();
+        await release;
+        return { entries: [{ agent: child }], pageInfo: { nextCursor: null } };
+      },
+      ref: () => assert.fail("the open hook only lists agents"),
+    },
+  } as unknown as PaseoApi;
+  const open = fixture.hooks.get("agent.open.before")!;
+  const pending = open({ request }, { paseo }) as Promise<{ appendSystemPrompt: string[] }>;
+  await started;
+  fixture.updateSettings({ status: "ready", revision: "2", values: changed });
+  releaseList();
+  const result = await pending;
+  assert.match(result.appendSystemPrompt[0], /"provider": "codex\/other"/);
+  assert.doesNotMatch(result.appendSystemPrompt[0], /### 待自动同步的已有子智能体/);
+  assert.match(result.appendSystemPrompt[0], /`team_get_roster`，以实时名册为准/);
 });
 
 test("workspace state still resolves directory policy when either host lookup is unavailable", async (t) => {

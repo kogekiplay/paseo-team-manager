@@ -2,7 +2,7 @@ import type { AgentToolDefinition, PluginHookRequests } from "@getpaseo/plugin/s
 import { resolvePresetMembers, resolveTeamMember } from "../shared/catalog-defaults.ts";
 import type { ProviderCatalogEntry } from "../shared/contracts.ts";
 import { findMemberByRole, isSubagentLabels, resolveEffectiveTeamConfig, resolveSubagentRoleId } from "../shared/policy.ts";
-import { buildCommanderPrompt, buildSubagentRolePrompt } from "../shared/prompt-builder.ts";
+import { buildCommanderPrompt, buildSubagentRolePrompt, type DriftedSubagentPromptItem } from "../shared/prompt-builder.ts";
 import { LABEL_KEYS, METADATA_KEYS, type TeamSettingsValues } from "../shared/settings.ts";
 
 export function applyAgentCreateBefore(
@@ -54,6 +54,7 @@ export function applyAgentOpenBefore(
   commanderTools: AgentToolDefinition | readonly AgentToolDefinition[],
   homeDir: string,
   catalogProviders: readonly ProviderCatalogEntry[] = [],
+  driftedSubagents: readonly DriftedSubagentPromptItem[] = [],
 ): PluginHookRequests["agent.open.before"] | undefined {
   if (request.purpose === "history" || request.background) return;
   const { labels, metadata, cwd, workspaceId } = request;
@@ -78,7 +79,7 @@ export function applyAgentOpenBefore(
   return {
     ...request,
     appendSystemPrompt: [...prompts, buildCommanderPrompt({
-      preset: effective.preset, cwd, workspaceId, resolvedMembers: resolved, sessionMemberOverrides: effective.sessionMemberOverrides,
+      preset: effective.preset, cwd, workspaceId, resolvedMembers: resolved, sessionMemberOverrides: effective.sessionMemberOverrides, driftedSubagents,
     })],
     tools: [...request.tools, ...("execute" in commanderTools ? [commanderTools] : commanderTools)],
   };
