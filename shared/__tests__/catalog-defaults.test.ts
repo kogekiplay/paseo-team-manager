@@ -38,7 +38,7 @@ const codex = catalogEntry("codex", [
   controls: [{ type: "select", key: "service_tier", label: "Speed", choices: [{ value: "default", label: "Default" }] }],
 });
 const antigravity = catalogEntry("antigravity", [
-  { id: "gemini-4-neon", label: "Neon", isDefault: true, thinkingOptions: [thinking("high", true), thinking("medium")] },
+  { id: "gemini-4-neon", label: "Neon", isDefault: true, thinkingOptions: [thinking("high", true), thinking("medium"), thinking("xhigh")] },
   { id: "gemini-4-carbon", label: "Carbon", thinkingOptions: [thinking("high", true)] },
   { id: "gemini-4-hydrogen", label: "Hydrogen", thinkingOptions: [thinking("medium", true)] },
   { id: "gemini-4-argon", label: "Argon", thinkingOptions: [thinking("medium", true)] },
@@ -118,6 +118,7 @@ test("the default roles resolve across Magpie Codex and Antigravity", () => {
   assert.deepEqual([byRole.get("backend")?.member.features, byRole.get("frontend")?.member.features], [{ service_tier: "default" }, {}]);
   assert.deepEqual([byRole.get("frontend")?.member.model, byRole.get("explorer")?.member.model], ["gemini-4-neon", "gemini-4-hydrogen"]);
   assert.equal(byRole.get("frontend")?.member.thinkingOptionId, "high");
+  assert.equal(byRole.get("advisor")?.member.thinkingOptionId, "xhigh");
   assert.equal(byRole.get("explorer")?.member.thinkingOptionId, "medium");
   for (const item of resolved) {
     assert.equal(item.status, "auto-matched");
@@ -125,6 +126,49 @@ test("the default roles resolve across Magpie Codex and Antigravity", () => {
   }
   const serialized = JSON.stringify(resolved);
   assert.doesNotMatch(serialized, /astra|fable|gemini-3\.8-flash|claude/i);
+});
+
+test("the advisor and its aliases prefer native Gemini with the highest supported thinking tier", () => {
+  for (const role of ["advisor", " Architect ", "consultant", "second-opinion"]) {
+    assert.deepEqual(resolveRoleFromCatalog(role, [codex, claude, antigravity]), {
+      provider: "antigravity", model: "gemini-4-neon", thinkingOptionId: "xhigh", modeId: "", features: {},
+    });
+  }
+  const noNeon = { ...antigravity, models: antigravity.models.filter(({ id }) => id !== "gemini-4-neon") };
+  assert.deepEqual(resolveRoleFromCatalog("advisor", [codex, noNeon]), {
+    provider: "antigravity", model: "gemini-4-carbon", thinkingOptionId: "high", modeId: "", features: {},
+  });
+});
+
+test("the advisor uses Codex before Claude and falls back to the host's affordable default without Magpie", () => {
+  assert.deepEqual(resolveRoleFromCatalog("advisor", [codex]), {
+    provider: "codex", model: "auto/gpt-6.2-sol", thinkingOptionId: "xhigh", modeId: "", features: { service_tier: "default" },
+  });
+  const nativeCodex = {
+    ...codex, controls: [],
+    models: codex.models.filter(({ id }) => id !== "auto/gpt-6.2-sol")
+      .map((model) => ({ ...model, isDefault: model.id === "gpt-5.4" })),
+  };
+  assert.deepEqual(resolveRoleFromCatalog("advisor", [claude, nativeCodex]), {
+    provider: "codex", model: "gpt-5.4", thinkingOptionId: "high", modeId: "", features: {},
+  });
+});
+
+test("the advisor skips providers with only excluded models and uses an eligible fallback", () => {
+  const legacyAntigravity = {
+    ...antigravity, models: antigravity.models.filter(({ id }) => id === "gemini-3.8-flash" || id === "claude-sonnet"),
+  };
+  const premiumCodex = { ...codex, models: codex.models.filter(({ id }) => /astra|fable/.test(id)) };
+  const unusable = [premiumCodex, legacyAntigravity];
+  assert.equal(resolveRoleFromCatalog("advisor", unusable), null);
+  assert.equal(resolveRoleFromCatalog("advisor", [...unusable, claude])?.provider, "claude");
+  const other = catalogEntry("opencode", [
+    { id: "gemini-3.8-flash", label: "Old Flash", isDefault: true, thinkingOptions: [] },
+    { id: "foo-model", label: "Foo", thinkingOptions: [thinking("medium")] },
+  ]);
+  assert.deepEqual(resolveRoleFromCatalog("advisor", [...unusable, other]), {
+    provider: "opencode", model: "foo-model", thinkingOptionId: "medium", modeId: "", features: {},
+  });
 });
 
 test("native Codex without Magpie gets its real default model and no unsupported service tier", () => {
@@ -137,7 +181,7 @@ test("native Codex without Magpie gets its real default model and no unsupported
 test("a pure Claude host resolves every default role with catalog-supported options", () => {
   const [preset] = createDefaultPresets();
   const { resolved } = resolvePresetMembers(preset, [claude]);
-  assert.equal(resolved.length, 5);
+  assert.equal(resolved.length, 6);
   for (const item of resolved) {
     assert.equal(item.member.provider, "claude");
     assert.ok(item.member.model.startsWith("claude-"));

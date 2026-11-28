@@ -25,11 +25,15 @@ interface RolePreferences {
   providers: string[];
   modelIds: string[];
   thinkingIds: string[];
+  excludeHighCostAndLegacyModels?: boolean;
 }
 
 const ROLE_ALIASES: Record<string, string> = {
   ui: "frontend",
   design: "frontend",
+  architect: "advisor",
+  consultant: "advisor",
+  "second-opinion": "advisor",
   review: "reviewer",
   audit: "reviewer",
   research: "explorer",
@@ -46,6 +50,12 @@ const ROLE_PREFERENCES: Record<string, RolePreferences> = {
     providers: ["antigravity", "claude", "codex"],
     modelIds: ["gemini-4-neon", "gemini-4-carbon"],
     thinkingIds: ["high", "medium"],
+  },
+  advisor: {
+    providers: ["antigravity", "codex", "claude"],
+    modelIds: ["gemini-4-neon", "gemini-4-carbon", "auto/gpt-6.2-sol"],
+    thinkingIds: ["xhigh", "high", "medium"],
+    excludeHighCostAndLegacyModels: true,
   },
   reviewer: {
     providers: ["codex", "claude", "antigravity"],
@@ -64,6 +74,7 @@ const DEFAULT_PREFERENCES: RolePreferences = {
   modelIds: [],
   thinkingIds: ["xhigh", "high", "medium"],
 };
+const RETIRED_FLASH_MODEL = /gemini-3\.8-flash/i;
 
 export function isHighCostModelId(modelId: string): boolean {
   return /(astra|fable)/i.test(modelId);
@@ -74,23 +85,27 @@ function canonicalProvider(provider: string): string {
 }
 
 function isAntigravityModel(model: ProviderCatalogModel): boolean {
-  return /gemini/i.test(model.id) && !/gemini-3\.8-flash/i.test(model.id) && !/claude/i.test(model.id);
+  return /gemini/i.test(model.id) && !RETIRED_FLASH_MODEL.test(model.id) && !/claude/i.test(model.id);
 }
 
 function selectableModels(entry: ProviderCatalogEntry): ProviderCatalogModel[] {
   return entry.models.filter((model) => model.isSelectable !== false);
 }
 
-function chooseModel(entry: ProviderCatalogEntry, preferredIds: readonly string[]): ProviderCatalogModel | null {
+function chooseModel(
+  entry: ProviderCatalogEntry,
+  preferredIds: readonly string[],
+  excludeHighCostAndLegacyModels = false,
+): ProviderCatalogModel | null {
   const models = selectableModels(entry);
   if (models.length === 0) return null;
   const usable = models.filter((model) => !isHighCostModelId(model.id));
-  const pool = usable.length > 0 ? usable : models;
-  const antigravityPool = canonicalProvider(entry.provider) === "antigravity"
+  const pool = excludeHighCostAndLegacyModels
+    ? usable.filter((model) => !RETIRED_FLASH_MODEL.test(model.id))
+    : usable.length > 0 ? usable : models;
+  const effectivePool = canonicalProvider(entry.provider) === "antigravity"
     ? pool.filter(isAntigravityModel)
     : pool;
-  if (canonicalProvider(entry.provider) === "antigravity" && antigravityPool.length === 0) return null;
-  const effectivePool = antigravityPool.length > 0 ? antigravityPool : pool;
   for (const preferredId of preferredIds) {
     const match = effectivePool.find((model) => model.id === preferredId);
     if (match) return match;
@@ -107,10 +122,9 @@ function hasDefaultServiceTier(controls: readonly ProviderCatalogControl[]): boo
   return controls.some((control) => control.type === "select" && control.key === "service_tier" && control.choices.some((choice) => choice.value === "default"));
 }
 
-function chooseEntry(roleId: string, providers: readonly ProviderCatalogEntry[]): ProviderCatalogEntry | null {
-  const role = ROLE_ALIASES[roleId.trim().toLowerCase()] ?? roleId.trim().toLowerCase();
-  const preferences = ROLE_PREFERENCES[role] ?? DEFAULT_PREFERENCES;
-  const available = providers.filter((entry) => entry.enabled && entry.status === "ready" && chooseModel(entry, preferences.modelIds) !== null);
+function chooseEntry(preferences: RolePreferences, providers: readonly ProviderCatalogEntry[]): ProviderCatalogEntry | null {
+  const available = providers.filter((entry) => entry.enabled && entry.status === "ready" &&
+    chooseModel(entry, preferences.modelIds, preferences.excludeHighCostAndLegacyModels) !== null);
   for (const preferredProvider of preferences.providers) {
     const entry = available.find((candidate) => canonicalProvider(candidate.provider) === preferredProvider);
     if (entry) return entry;
@@ -118,24 +132,20 @@ function chooseEntry(roleId: string, providers: readonly ProviderCatalogEntry[])
   return available[0] ?? null;
 }
 
-function rolePreferences(roleId: string): RolePreferences {
-  const role = ROLE_ALIASES[roleId.trim().toLowerCase()] ?? roleId.trim().toLowerCase();
-  return ROLE_PREFERENCES[role] ?? DEFAULT_PREFERENCES;
-}
-
 export function resolveRoleFromCatalog(
   roleId: string,
   providers: readonly ProviderCatalogEntry[],
   options: { preferredThinking?: string } = {},
 ): { provider: string; model: string; thinkingOptionId: string; modeId: string; features: Record<string, FeatureValue> } | null {
-  const preferences = rolePreferences(roleId);
-  const entry = chooseEntry(roleId, providers);
+  const roleKey = roleId.trim().toLowerCase();
+  const role = ROLE_ALIASES[roleKey] ?? roleKey;
+  const preferences = ROLE_PREFERENCES[role] ?? DEFAULT_PREFERENCES;
+  const entry = chooseEntry(preferences, providers);
   if (!entry) return null;
-  const role = ROLE_ALIASES[roleId.trim().toLowerCase()] ?? roleId.trim().toLowerCase();
   const modelIds = canonicalProvider(entry.provider) === "claude" && role === "explorer"
     ? ["claude-haiku", ...preferences.modelIds]
     : preferences.modelIds;
-  const model = chooseModel(entry, modelIds);
+  const model = chooseModel(entry, modelIds, preferences.excludeHighCostAndLegacyModels);
   if (!model) return null;
   const thinkingOptionId = chooseOption(model.thinkingOptions, options.preferredThinking ? [options.preferredThinking, ...preferences.thinkingIds] : preferences.thinkingIds, "");
   return {

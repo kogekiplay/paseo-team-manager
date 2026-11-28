@@ -6,7 +6,7 @@ import {
 } from "../policy.ts";
 import {
   applySessionMemberOverridesToPreset, computeMemberConfigFingerprint, computeTeamSyncFingerprint, createDefaultPresets,
-  DEFAULT_TEAM_SETTINGS, filterActiveSessionMemberOverrides, formatProviderModel, LABEL_KEYS, METADATA_KEYS,
+  DEFAULT_TEAM_SETTINGS, filterActiveSessionMemberOverrides, formatProviderModel, LABEL_KEYS, METADATA_KEYS, migrateTeamSettings,
   PARENT_AGENT_ID_LABEL, parseSessionMemberOverrides, parseTeamSettings, teamSettings, TeamMemberSchema, TeamPresetSchema,
 } from "../settings.ts";
 
@@ -129,7 +129,8 @@ test("a session override preserves the preset mode only for the same explicitly 
 test("the host setting defines the full default team and independent snapshots", () => {
   assert.equal(teamSettings.id, "team");
   assert.equal(teamSettings.scope, "host");
-  assert.equal(teamSettings.version, 2);
+  assert.equal(teamSettings.version, 3);
+  assert.equal(teamSettings.migrate, migrateTeamSettings);
   assert.deepEqual(parseTeamSettings({}), DEFAULT_TEAM_SETTINGS);
   const { defaultPresetId, presets: [preset], ...settings } = DEFAULT_TEAM_SETTINGS;
   assert.deepEqual(settings, {
@@ -145,11 +146,15 @@ test("the host setting defines the full default team and independent snapshots",
     [roleId, enabled, provider, model, thinkingOptionId, modeId, features]), [
     ["backend", true, "auto", "", "", "", {}],
     ["frontend", true, "auto", "", "", "", {}],
+    ["advisor", true, "auto", "", "", "", {}],
     ["reviewer", false, "auto", "", "", "", {}],
     ["qa", false, "auto", "", "", "", {}],
     ["explorer", false, "auto", "", "", "", {}],
   ]);
   assert.ok(preset.members.every((member) => member.responsibilities && member.rolePrompt));
+  assert.equal(preset.members[2].name, "架构顾问");
+  assert.match(preset.members[2].responsibilities, /只读.*独立第二意见/);
+  assert.match(preset.members[2].rolePrompt, /绝不编辑、创建或删除任何文件/);
   assert.deepEqual(new Set(preset.members.map((member) => formatProviderModel(member.provider, member.model))), new Set([
     "auto",
   ]));
@@ -157,7 +162,7 @@ test("the host setting defines the full default team and independent snapshots",
   independent.presets[0].members[0].features.service_tier = "priority";
   independent.presets[0].members.pop();
   assert.deepEqual(parseTeamSettings({}).presets, createDefaultPresets());
-  assert.equal(createDefaultPresets()[0].members.length, 5);
+  assert.equal(createDefaultPresets()[0].members.length, 6);
   assert.deepEqual(createDefaultPresets()[0].members[0].features, {});
 });
 
@@ -184,6 +189,50 @@ test("settings migration replaces legacy high-cost models while preserving custo
   assert.equal(migrated.presets[0].members[2].model, "auto/gpt-6.1-terra");
   assert.equal((legacy.presets[0].members[0] as { model: string }).model, "auto/gpt-6.2-AsTrA");
   assert.deepEqual(teamSettings.migrate!(legacy, 2), legacy);
+});
+
+test("v2 settings add the advisor after frontend and preserve all existing configuration", () => {
+  const [preset] = createDefaultPresets();
+  const advisor = preset.members[2];
+  const backend = { ...preset.members[0], provider: "codex", model: "gpt-5.4", modeId: "plan", features: { trace: true } };
+  const { members: [, frontend, , reviewer] } = preset;
+  const savedPreset = { ...preset, name: "My full-stack team", customField: "keep", members: [backend, frontend, reviewer] };
+  const customPreset = { ...savedPreset, id: "custom" };
+  const original = { enabled: false, defaultPresetId: customPreset.id, customSetting: true, presets: [savedPreset, customPreset] };
+  const snapshot = structuredClone(original);
+  const migrated = migrateTeamSettings(original, 2);
+  assert.deepEqual(migrated, { ...original, presets: [{ ...savedPreset, members: [backend, frontend, advisor, reviewer] }, customPreset] });
+  assert.deepEqual(original, snapshot);
+  assert.deepEqual(migrateTeamSettings(migrated, 2), migrated);
+  assert.equal(migrateTeamSettings(original, 3), original);
+});
+
+test("v2 settings keep an existing customized advisor and append when frontend is absent", () => {
+  const [preset] = createDefaultPresets();
+  const [backend, , advisor] = preset.members;
+  const existing = { ...advisor, roleId: "AdViSoR", name: "Second opinion", enabled: false, provider: "codex", model: "gpt-5.4" };
+  const customized = { presets: [{ ...preset, members: [existing, backend] }] };
+  assert.deepEqual(migrateTeamSettings(customized, 2), customized);
+  const withoutFrontend = { ...preset, members: [backend] };
+  assert.deepEqual(migrateTeamSettings({ presets: [withoutFrontend] }, 2), {
+    presets: [{ ...withoutFrontend, members: [backend, advisor] }],
+  });
+});
+
+test("v1 settings migrate legacy models before adding the advisor without mutating the input", () => {
+  const [preset] = createDefaultPresets();
+  const [backend, frontend, advisor, reviewer] = preset.members;
+  const oldBackend = { ...backend, provider: "codex", model: "auto/gpt-6.2-AsTrA", thinkingOptionId: "xhigh" };
+  const oldReviewer = { ...reviewer, provider: "codex", model: "auto/gpt-6.1-FABLE" };
+  const savedPreset = { ...preset, members: [oldBackend, frontend, oldReviewer] };
+  const legacy = { presets: [savedPreset] };
+  const snapshot = structuredClone(legacy);
+  assert.deepEqual(migrateTeamSettings(legacy, 1), {
+    presets: [{ ...savedPreset, members: [
+      { ...oldBackend, model: "auto/gpt-6.2-sol" }, frontend, advisor, { ...oldReviewer, model: "auto/gpt-6.2-sol" },
+    ] }],
+  });
+  assert.deepEqual(legacy, snapshot);
 });
 
 test("settings validate required fields, role IDs, feature values and preset presence", () => {

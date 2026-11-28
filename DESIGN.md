@@ -92,6 +92,9 @@
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `backend` | 后端开发 | 是 | `auto`（宿主机自适应） | 宿主机自适应 | 继承默认权限 | 宿主机自适应 | 服务端/daemon/API/数据层/算法逻辑/单元测试 |
 | `frontend` | 前端开发 | 是 | `auto`（宿主机自适应） | 宿主机自适应 | 继承默认权限 | 宿主机自适应 | UI 组件、交互体验、样式主题、跨端响应式适配 |
+| `advisor` | 架构顾问 | 是 | `auto`（优先 Antigravity，其次 Codex） | 优先 `xhigh`，其次 `high`、`medium` | 继承默认权限 | 宿主机自适应 | 只读提供架构方案、技术取舍、根因定位与独立第二意见 |
+
+架构顾问的角色指令要求独立分析、给出推荐和风险依据，全程只读。自动匹配优先选择 Antigravity 原生 Gemini 的 `gemini-4-neon`、`gemini-4-carbon`，其次尝试 Codex 的 `auto/gpt-6.2-sol` 或符合条件的宿主机默认模型，再尝试 Claude 或其他就绪提供方。`architect`、`consultant`、`second-opinion` 共用这组匹配偏好。
 
 ### 4.3 内置可选扩展成员（预设中预置，可一键开关）
 
@@ -108,7 +111,9 @@
 ### 5.1 共享契约（`shared/`）
 
 - `shared/settings.ts`：
-  - 使用 `defineSettings`（`scope: "host"`, `version: 2`）+ Zod schema 定义持久化配置，并将旧版本中的高成本模型配置迁移到 `auto/gpt-6.2-sol`：
+  - 使用 `defineSettings`（`scope: "host"`, `version: 3`）和 Zod schema 定义持久化配置。
+    - v1 先执行既有的高成本模型迁移，替换为 `auto/gpt-6.2-sol`。
+    - v2 → v3 仅在已保存的 `default-fullstack` 缺少 `advisor` 时补齐角色，优先插在 `frontend` 后，无 `frontend` 时追加到末尾。已有顾问、其他成员配置和自定义预设均保留。
     - `enabled`: 全局是否启用团队指挥模式（默认 `true`）
     - `autoApplyToNewTopLevelAgents`: 是否对新开的顶层会话自动注入（默认 `true`）
     - `excludedDirectories`: 排除目录列表（如 `~/Downloads` 默认可配置跳过，避免闲聊目录也被当成开发项目，默认可留空或提供快捷排除提示，按设置开关决定）

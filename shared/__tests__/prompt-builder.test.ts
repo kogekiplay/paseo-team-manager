@@ -55,7 +55,8 @@ test("the commander gets copyable native tool parameters for enabled members", (
   assert.match(prompt, /ws-123/);
   assert.match(prompt, /后端开发/);
   assert.match(prompt, /前端开发/);
-  const [backend, frontend, ...otherExamples] = [...prompt.matchAll(/```json\n([\s\S]*?)\n```/g)]
+  assert.match(prompt, /架构顾问[\s\S]*只读提供架构方案/);
+  const [backend, frontend, advisor, ...otherExamples] = [...prompt.matchAll(/```json\n([\s\S]*?)\n```/g)]
     .map(([, json]) => JSON.parse(json));
   assert.deepEqual(backend, {
     provider: "codex/auto/gpt-6.2-sol",
@@ -68,6 +69,12 @@ test("the commander gets copyable native tool parameters for enabled members", (
     settings: { thinkingOptionId: "high" },
     labels: { "paseo-team-manager.role": "frontend", "paseo-team-manager.preset": "default-fullstack" },
     title: "[frontend] 任务标题", initialPrompt: "填写任务目标、文件边界、接口契约与验收要求。", notifyOnFinish: true,
+  });
+  assert.deepEqual(advisor, {
+    provider: "antigravity/gemini-4-neon",
+    settings: { thinkingOptionId: "high" },
+    labels: { "paseo-team-manager.role": "advisor", "paseo-team-manager.preset": "default-fullstack" },
+    title: "[advisor] 任务标题", initialPrompt: "填写任务目标、文件边界、接口契约与验收要求。", notifyOnFinish: true,
   });
   assert.deepEqual(otherExamples, []);
   assert.doesNotMatch(prompt, /"modeId"/);

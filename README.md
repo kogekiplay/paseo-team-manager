@@ -14,17 +14,22 @@ Paseo Team Manager is a Paseo plugin (`>=0.17.1`) that equips top-level project 
 
 ## Default team
 
-The default full-stack preset includes two active members and three optional members.
+The default full-stack preset enables Backend, Frontend, and Advisor. Reviewer, QA, and Explorer are optional.
 
 | Role | Provider and model | Thinking | Mode |
 | --- | --- | --- | --- |
 | Backend | `auto` host-adaptive | host-adaptive | Inherited |
 | Frontend | `auto` host-adaptive | host-adaptive | Inherited |
+| Advisor | `auto` host-adaptive | Prefers `xhigh`, then `high` and `medium` | Inherited |
 | Reviewer | `auto` host-adaptive | host-adaptive | Inherited |
 | QA | `auto` host-adaptive | host-adaptive | Inherited |
 | Explorer | `auto` host-adaptive | host-adaptive | Inherited |
 
 The default preset stores `provider: "auto"` and resolves each role against the host's ready Provider catalog. On a typical Magpie-enabled host, backend and QA resolve to Codex `auto/gpt-6.2-sol` with `xhigh`, frontend resolves to Antigravity `gemini-4-neon`, and explorer resolves to Antigravity `gemini-4-hydrogen`. Native Codex, Claude Code, Antigravity-only, and other ready providers receive supported fallbacks. Optional roles start disabled and can be enabled in the team settings.
+
+The Advisor gives independent second opinions on architecture, technical trade-offs, and root causes. Its instructions limit it to read-only analysis. Auto-match prefers native Gemini on Antigravity (`gemini-4-neon`, then `gemini-4-carbon`), followed by Codex (`auto/gpt-6.2-sol`, then an eligible host default), then Claude or another ready provider with an eligible model.
+
+Settings schema v3 adds the Advisor to saved `default-fullstack` presets that lack the role. It goes after Frontend when present, or at the end. Existing role settings and custom presets are preserved by this step. Upgrades from settings v1 first apply the existing model migration.
 
 Auto-match and cross-provider fallback leave the session permission mode unset so the session inherits Paseo's defaults. The plugin applies a preset permission mode only when you explicitly select it for the provider that will run the agent.
 

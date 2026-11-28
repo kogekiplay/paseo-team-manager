@@ -168,6 +168,16 @@ test("open respects an explicit session opt-out and exclusions", () => {
   assert.deepEqual(applyAgentOpenBefore(override, excluded, tool, homeDir, codexCatalog)?.tools, [tool]);
 });
 
+test("advisor children receive read-only advice instructions without commander tools", () => {
+  const request = { ...openRequest, labels: { ...parentLabel, [LABEL_KEYS.role]: "advisor" } };
+  const result = applyAgentOpenBefore(request, settings, tool, homeDir, codexCatalog);
+  assert.deepEqual(result?.tools, []);
+  const prompt = result?.appendSystemPrompt?.[0] ?? "";
+  assert.match(prompt, /架构顾问[\s\S]*独立第二意见/);
+  assert.match(prompt, /绝不编辑、创建或删除任何文件/);
+  assert.doesNotMatch(prompt, /Commander|team_get_roster|team_update_member_model/);
+});
+
 test("roster returns current settings, native create parameters and live team children across pages", async () => {
   const backendLabels = { ...parentLabel, [LABEL_KEYS.role]: "backend" };
   const agent = (id: string, fields: Partial<PaseoAgent> = {}) => ({
@@ -200,16 +210,22 @@ test("roster returns current settings, native create parameters and live team ch
   };
   const result = await liveTool.execute({}, context);
   const roster = result.structuredContent as {
-    presetId: string; members: { enabled: boolean; createAgentParams: unknown }[]; agents: { agentId: string }[]; agentListError: string | null;
+    presetId: string; members: { roleId: string; enabled: boolean; createAgentParams: unknown }[]; agents: { agentId: string }[]; agentListError: string | null;
   };
   assert.deepEqual(seenCursors, [undefined, "next"]);
   assert.equal(roster.presetId, "updated");
-  assert.equal(roster.members.length, 5);
-  assert.equal(roster.members[4].enabled, false);
+  assert.deepEqual(roster.members.map(({ roleId, enabled }) => [roleId, enabled]), [
+    ["backend", true], ["frontend", true], ["advisor", true], ["reviewer", false], ["qa", false], ["explorer", false],
+  ]);
   assert.deepEqual(roster.members[0].createAgentParams, {
     provider: "codex/auto/gpt-6.2-sol",
     settings: { thinkingOptionId: "xhigh", features: { service_tier: "default" } },
     labels: { [LABEL_KEYS.role]: "backend", [LABEL_KEYS.preset]: "updated" }, recommendedTitlePrefix: "[backend] ",
+  });
+  assert.deepEqual(roster.members[2].createAgentParams, {
+    provider: "codex/auto/gpt-6.2-sol",
+    settings: { thinkingOptionId: "xhigh", features: { service_tier: "default" } },
+    labels: { [LABEL_KEYS.role]: "advisor", [LABEL_KEYS.preset]: "updated" }, recommendedTitlePrefix: "[advisor] ",
   });
   assert.deepEqual(roster.agents.map(({ agentId }) => agentId), ["live"]);
   assert.equal(roster.agentListError, null);

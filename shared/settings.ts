@@ -185,6 +185,22 @@ export function applySessionMemberOverridesToPreset(
   };
 }
 
+function createDefaultAdvisorMember(): TeamMember {
+  return TeamMemberSchema.parse({
+    id: "advisor",
+    roleId: "advisor",
+    name: "架构顾问",
+    enabled: true,
+    provider: AUTO_PROVIDER,
+    model: "",
+    thinkingOptionId: "",
+    modeId: "",
+    features: {},
+    responsibilities: "只读提供架构方案、技术取舍、根因定位与独立第二意见，不修改代码。",
+    rolePrompt: "仅做只读分析与决策建议，绝不编辑、创建或删除任何文件，不编写业务代码。先独立审视问题、约束、备选方案与已排除路径，再给出明确推荐结论、权衡依据与关键风险。",
+  });
+}
+
 export function createDefaultPresets(): TeamPreset[] {
   return [TeamPresetSchema.parse({
     id: "default-fullstack",
@@ -215,6 +231,7 @@ export function createDefaultPresets(): TeamPreset[] {
         responsibilities: "负责 UI 组件、交互体验、样式主题及跨端响应式适配。",
         rolePrompt: "以共享接口契约为准实现界面，覆盖加载、空数据和错误状态，并验证不同屏幕尺寸与主题下的交互和可读性。",
       },
+      createDefaultAdvisorMember(),
       {
         id: "reviewer",
         roleId: "reviewer",
@@ -263,32 +280,40 @@ export function parseTeamSettings(raw: unknown): TeamSettingsValues {
 
 export const DEFAULT_TEAM_SETTINGS = parseTeamSettings({});
 
+function isSettingsRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasRole(member: unknown, roleId: string): boolean {
+  return isSettingsRecord(member) && typeof member.roleId === "string" && member.roleId.trim().toLowerCase() === roleId;
+}
+
 export function migrateTeamSettings(values: unknown, fromVersion: number): unknown {
-  if (fromVersion >= 2 || typeof values !== "object" || values === null || Array.isArray(values)) return values;
-  const raw = values as Record<string, unknown>;
-  const presets = Array.isArray(raw.presets)
-    ? raw.presets.map((preset) => {
-      if (typeof preset !== "object" || preset === null || Array.isArray(preset)) return preset;
-      const presetRecord = preset as Record<string, unknown>;
-      const members = Array.isArray(presetRecord.members)
-        ? presetRecord.members.map((member) => {
-          if (typeof member !== "object" || member === null || Array.isArray(member)) return member;
-          const memberRecord = member as Record<string, unknown>;
-          const model = memberRecord.model;
-          if (typeof model !== "string" || !/(astra|fable)/i.test(model)) return member;
-          return { ...memberRecord, model: "auto/gpt-6.2-sol" };
-        })
-        : presetRecord.members;
-      return { ...presetRecord, ...(Array.isArray(presetRecord.members) ? { members } : {}) };
-    })
-    : raw.presets;
-  return { ...raw, ...(Array.isArray(raw.presets) ? { presets } : {}) };
+  if (fromVersion >= 3 || !isSettingsRecord(values) || !Array.isArray(values.presets)) return values;
+  const presets = values.presets.map((preset) => {
+    if (!isSettingsRecord(preset) || !Array.isArray(preset.members)) return preset;
+
+    let members: unknown[] = preset.members;
+    if (fromVersion < 2) {
+      members = members.map((member) => {
+        if (!isSettingsRecord(member) || typeof member.model !== "string" || !/(astra|fable)/i.test(member.model)) return member;
+        return { ...member, model: "auto/gpt-6.2-sol" };
+      });
+    }
+    if (preset.id === "default-fullstack" && !members.some((member) => hasRole(member, "advisor"))) {
+      const frontendIndex = members.findIndex((member) => hasRole(member, "frontend"));
+      const insertAt = frontendIndex < 0 ? members.length : frontendIndex + 1;
+      members = [...members.slice(0, insertAt), createDefaultAdvisorMember(), ...members.slice(insertAt)];
+    }
+    return members === preset.members ? preset : { ...preset, members };
+  });
+  return { ...values, presets };
 }
 
 export const teamSettings = defineSettings({
   id: SETTINGS_ID,
   scope: "host",
-  version: 2,
+  version: 3,
   schema: teamSettingsSchema,
   migrate: migrateTeamSettings,
 });
