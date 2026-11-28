@@ -404,6 +404,7 @@ describe("brand SVG icon and host auto-match helpers", () => {
           thinkingOptions: [
             { id: "medium", label: "Medium" },
             { id: "high", label: "High" },
+            { id: "xhigh", label: "Extra High" },
           ],
         },
       ],
@@ -417,13 +418,15 @@ describe("brand SVG icon and host auto-match helpers", () => {
 
   it("locks auto/fallback members to host defaults, applies single fallback, and resets all to auto", () => {
     const defaultPreset = DEFAULT_TEAM_SETTINGS.presets[0];
+    assert.equal(defaultPreset.members.length, 6);
     const { preset: locked, lockedCount } = lockPresetMembersToHost(
       defaultPreset,
       sampleCatalog,
     );
-    assert.equal(lockedCount, defaultPreset.members.length);
+    assert.equal(lockedCount, 6);
     const lockedBackend = locked.members.find((m) => m.roleId === "backend");
     const lockedFrontend = locked.members.find((m) => m.roleId === "frontend");
+    const lockedAdvisor = locked.members.find((m) => m.roleId === "advisor");
     assert.equal(lockedBackend?.provider, "codex");
     assert.equal(lockedBackend?.model, "auto/gpt-6.2-sol");
     assert.equal(lockedBackend?.thinkingOptionId, "xhigh");
@@ -432,6 +435,11 @@ describe("brand SVG icon and host auto-match helpers", () => {
     assert.equal(lockedFrontend?.provider, "antigravity");
     assert.equal(lockedFrontend?.model, "gemini-4-neon");
     assert.equal(lockedFrontend?.modeId, "");
+    assert.equal(lockedAdvisor?.enabled, true);
+    assert.equal(lockedAdvisor?.provider, "antigravity");
+    assert.equal(lockedAdvisor?.model, "gemini-4-neon");
+    assert.equal(lockedAdvisor?.thinkingOptionId, "xhigh");
+    assert.equal(lockedAdvisor?.modeId, "");
 
     // Explicit same-provider modeId is preserved when locking host defaults
     const withExplicitMode = upsertMember(locked, {

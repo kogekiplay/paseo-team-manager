@@ -11,7 +11,7 @@ Paseo 团队管理（Paseo Team Manager）为 Paseo 顶层对话自动注入团�
 
 ### 零配置跨环境宿主机自适应
 
-内置的全栈开发团队模板（默认启用 `backend`、`frontend`，可选扩展 `reviewer`、`qa`、`explorer`）默认对所有角色采用「自动匹配宿主机（`auto`）」。运行时会根据当前宿主机实际已启用且就绪的模型提供方目录，自动为每个角色匹配最适合的真实可用模型、思考深度与宿主机支持的特性选项：
+内置的全栈开发团队模板包含 6 个角色（默认启用 `backend`、`frontend` 与只读架构顾问 / 第二意见角色 `advisor`，可选扩展 `reviewer`、`qa`、`explorer`），默认对所有角色采用「自动匹配宿主机（`auto`）」。运行时会根据当前宿主机实际已启用且就绪的模型提供方目录，自动为每个角色匹配最适合的真实可用模型、思考深度与宿主机支持的特性选项：
 
 - 兼容 Magpie 路由组、原生 Codex、Claude Code、Antigravity 以及宿主机上配置的其他第三方模型提供方，开箱即用。
 - 自动匹配时会自动避开 `astra`、`fable` 等超高成本模型，并仅在宿主机提供方真实支持 `service_tier` 时附带 `service_tier: "default"`。
